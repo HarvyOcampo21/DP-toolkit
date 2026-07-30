@@ -236,3 +236,9 @@ async function checkConnection() {
     text.textContent = '❌ Disconnected — ' + err.message;
   }
 }
+
+// ── Version footer ────────────────────────────────────────────────────────
+const dpVersionText = document.getElementById("dpVersionText");
+if (dpVersionText) {
+  dpVersionText.textContent = "v" + chrome.runtime.getManifest().version;
+}
