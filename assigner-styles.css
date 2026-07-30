@@ -1,0 +1,518 @@
+/* ── Assign cell layout ──────────────────────────────────────────────── */
+.dp-assign-cell { padding: 4px 8px; }
+.dp-assign-cell label { display: block; font-size: 0.75rem; color: #9aa0ad; margin-bottom: 4px; }
+
+/* ── Sidebar "Photo Assignment" card injected into the detail drawer ──── */
+.dp-drawer-assign-card { box-sizing: border-box; overflow: hidden; }
+.dp-drawer-assign-card h3 { margin-bottom: 12px; }
+.dp-drawer-assign-card .dp-assign-cell {
+  display: block !important; width: 100% !important; padding: 0; box-sizing: border-box;
+}
+.dp-drawer-assign-card .dp-assign-widget-row {
+  display: flex !important; flex-direction: column !important; align-items: stretch !important;
+  width: 100% !important; box-sizing: border-box;
+}
+.dp-drawer-assign-card .dp-action-row {
+  display: flex !important; flex-wrap: wrap !important; width: 100% !important;
+  row-gap: 8px; box-sizing: border-box;
+}
+.dp-drawer-assign-card .dp-assign-widget {
+  flex: 1 1 100% !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box;
+}
+
+/* Outer column: action row on top, downloaded checkbox below */
+.dp-assign-widget-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+/* Inner action row: status widget + drive + history, wrap when too many buttons */
+.dp-action-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.dp-assign-widget {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* Drive / history / copy-ref icon trio — kept as one flex item so wrapping
+   moves all three together instead of breaking the group apart. */
+.dp-icon-btn-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+/* Assign button (senior only) */
+.dp-assign-btn {
+  background: #262a38; border: 1px solid #353b4d; color: #c7cbd8;
+  border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;
+}
+.dp-assign-btn:hover { background: rgba(0,209,178,0.22); border-color: #00d1b2; }
+
+/* ── Status badges ───────────────────────────────────────────────────── */
+.dp-assigned-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgb(185,242,243); color: rgb(19,122,134);
+  border-radius: 6px; padding: 3px 8px;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer;
+}
+/* Assigned — amber (newly assigned, not yet started) */
+.dp-assigned-badge.is-assigned {
+  background: rgba(255,167,38,0.18); color: #e6941a;
+}
+.dp-assigned-badge.is-assigned .dp-badge-editor { background: rgba(255,167,38,0.2); }
+.dp-assigned-badge.is-assigned .dp-unassign-btn { color: #e6941a; }
+/* Completed — green */
+.dp-assigned-badge.is-completed {
+  background: rgba(0,209,178,0.22); color: #00d1b2;
+}
+.dp-assigned-badge.is-completed .dp-badge-editor { background: rgba(0,209,178,0.18); color: #00d1b2; }
+.dp-assigned-badge.is-completed .dp-unassign-btn { color: #00d1b2; }
+
+/* On Hold — purple */
+.dp-assigned-badge.is-on-hold {
+  background: rgba(149,117,205,0.22); color: #b39ddb;
+}
+.dp-assigned-badge.is-on-hold .dp-badge-editor { background: rgba(149,117,205,0.2); color: #b39ddb; }
+.dp-assigned-badge.is-on-hold .dp-unassign-btn { color: #b39ddb; }
+
+/* Rejected — red */
+.dp-assigned-badge.is-rejected {
+  background: rgba(229,57,53,0.15); color: #ef9a9a;
+}
+.dp-assigned-badge.is-rejected .dp-badge-editor { background: rgba(229,57,53,0.18); color: #ef9a9a; }
+.dp-assigned-badge.is-rejected .dp-unassign-btn { color: #ef9a9a; }
+
+/* Hold action button */
+.dp-hold-btn {
+  background: rgba(149,117,205,0.15); border: 1px solid #9575cd;
+  color: #b39ddb; border-radius: 6px; padding: 3px 7px;
+  font-size: 0.75rem; font-weight: 600; cursor: pointer; margin-left: 2px;
+}
+.dp-hold-btn:hover { background: rgba(149,117,205,0.3); }
+
+/* View Reason button */
+.dp-view-reason-btn {
+  background: rgba(149,117,205,0.1); border: 1px solid rgba(149,117,205,0.4);
+  color: #b39ddb; border-radius: 6px; padding: 3px 7px;
+  font-size: 0.75rem; cursor: pointer; margin-left: 2px;
+}
+.dp-view-reason-btn:hover { background: rgba(149,117,205,0.25); }
+
+/* ── On Hold modal ───────────────────────────────────────────────────── */
+.dp-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 99999;
+}
+.dp-modal {
+  background: #1f2330; border: 1px solid #333a4d; border-radius: 12px;
+  padding: 22px; width: 360px; max-width: 90vw;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+}
+.dp-modal-title {
+  font-size: 1rem; font-weight: 700; color: #e3e6ee; margin-bottom: 14px;
+}
+.dp-modal-textarea {
+  width: 100%; min-height: 90px; background: #262a38;
+  border: 1px solid #353b4d; border-radius: 8px;
+  color: #e3e6ee; font-size: 0.88rem; padding: 10px;
+  resize: vertical; font-family: inherit; margin-bottom: 14px;
+}
+.dp-modal-textarea:focus { outline: none; border-color: #9575cd; }
+.dp-modal-btns { display: flex; justify-content: flex-end; gap: 10px; }
+.dp-modal-cancel {
+  background: #262a38; border: 1px solid #353b4d; color: #9aa0ad;
+  border-radius: 8px; padding: 7px 16px; font-size: 0.88rem; cursor: pointer;
+}
+.dp-modal-cancel:hover { border-color: #9575cd; color: #b39ddb; }
+.dp-modal-save {
+  background: #9575cd; border: none; color: #fff;
+  border-radius: 8px; padding: 7px 16px; font-size: 0.88rem;
+  font-weight: 600; cursor: pointer;
+}
+.dp-modal-save:hover { background: #7e57c2; }
+
+.dp-badge-status { white-space: nowrap; }
+.dp-badge-editor { background: rgba(19,122,134,0.15); padding: 1px 6px; border-radius: 4px; }
+.dp-unassign-btn {
+  background: none; border: none; color: rgb(19,122,134);
+  font-weight: 700; cursor: pointer; font-size: 0.9rem; line-height: 1;
+}
+
+/* Junior: unassigned pill */
+.dp-unassigned-pill {
+  background: #262a38;
+  border: 1px dashed #4a5068;
+  color: #6b7280;
+  border-radius: 16px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+}
+
+/* Junior: Start button */
+.dp-start-btn {
+  background: rgba(0,209,178,0.15); border: 1px solid #00d1b2;
+  color: #00d1b2; border-radius: 6px; padding: 3px 8px;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer; margin-left: 4px;
+}
+.dp-start-btn:hover { background: rgba(0,209,178,0.3); }
+
+/* Backup Complete button injected into the side drawer toolbar — that
+   toolbar sits on a light/white background (unlike the dark table), so
+   this gets its own solid-fill treatment. */
+.dp-drawer-complete-btn {
+  background: #00d1b2; border: none; color: #fff;
+  border-radius: 6px; padding: 8px 16px; margin-right: 8px;
+  font-size: 0.85rem; font-weight: 700; cursor: pointer;
+  transition: opacity .15s;
+}
+.dp-drawer-complete-btn:hover { opacity: .85; }
+.dp-drawer-complete-btn:disabled { opacity: .6; cursor: default; }
+
+/* Editor picker popover */
+.dp-editor-popover {
+  display: none; position: absolute; top: 100%; left: 0; margin-top: 4px;
+  background: #1f2330; border: 1px solid #333a4d; border-radius: 8px;
+  padding: 4px; z-index: 999; min-width: 140px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.35); flex-direction: column; gap: 2px;
+}
+.dp-editor-popover.is-open { display: flex; }
+.dp-editor-option {
+  background: none; border: none; color: #e3e6ee; text-align: left;
+  padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+}
+.dp-editor-option:hover { background: rgba(0,209,178,0.12); color: #00d1b2; }
+
+/* Drive search button */
+.dp-drive-btn {
+  background: #262a38 !important; border: 1px solid #353b4d !important; color: #9aa0ad !important;
+  border-radius: 6px !important; width: 26px !important; height: 26px !important; flex: 0 0 auto;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+  cursor: pointer; padding: 0; box-sizing: border-box;
+}
+.dp-drive-btn:hover { border-color: #00d1b2 !important; color: #00d1b2 !important; }
+
+/* Downloaded checkbox */
+.dp-downloaded-wrap {
+  display: inline-flex; align-items: center; gap: 5px;
+  cursor: pointer; color: #9aa0ad; font-size: 0.72rem; white-space: nowrap;
+}
+.dp-downloaded-wrap:has(.dp-downloaded-checkbox:checked) { color: #00d1b2; }
+
+/* Transparent custom checkbox — removes the browser default white box */
+.dp-downloaded-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid #4a5068;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  margin: 0;
+  vertical-align: middle;
+}
+.dp-downloaded-checkbox:hover { border-color: #00d1b2; }
+.dp-downloaded-checkbox:checked {
+  background: #00d1b2;
+  border-color: #00d1b2;
+}
+.dp-downloaded-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 4px;
+  height: 7px;
+  border: 2px solid #111;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+/* ── Filter bar ──────────────────────────────────────────────────────── */
+.dp-filter-bar {
+  display: flex; flex-direction: row; align-items: center;
+  flex-wrap: wrap; gap: 20px; padding: 10px 16px;
+  background: #1b1e29; border: 1px solid #2b2f3d;
+  border-radius: 10px; margin: 10px 0 16px;
+}
+.dp-filter-section { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.dp-filter-label { color: #9aa0ad; font-size: 0.85rem; white-space: nowrap; }
+.dp-chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.dp-chip {
+  background: #262a38; border: 1px solid #353b4d; color: #c7cbd8;
+  border-radius: 16px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;
+}
+.dp-chip:hover { border-color: #00d1b2; }
+.dp-chip.is-active { background: rgba(0,209,178,0.18); border-color: #00d1b2; color: #00d1b2; font-weight: 600; }
+.dp-sort-wrap { display: flex; gap: 8px; }
+.dp-sort-btn {
+  background: #262a38; border: 1px solid #353b4d; color: #c7cbd8;
+  border-radius: 8px; padding: 4px 10px; font-size: 0.78rem; cursor: pointer;
+}
+.dp-sort-btn:hover { border-color: #00d1b2; }
+.dp-sort-btn.is-active { background: rgba(0,209,178,0.18); border-color: #00d1b2; color: #00d1b2; font-weight: 600; }
+.dp-editor-filter-wrap { position: relative; }
+.dp-editor-filter-btn {
+  background: #262a38; border: 1px solid #353b4d; color: #c7cbd8;
+  border-radius: 8px; padding: 5px 14px; font-size: 0.8rem; cursor: pointer;
+  min-width: 150px; text-align: left; white-space: nowrap;
+}
+.dp-editor-filter-btn:hover { border-color: #00d1b2; }
+.dp-editor-filter-popover {
+  display: none; position: absolute; top: 100%; left: 0; margin-top: 6px;
+  background: #1f2330; border: 1px solid #333a4d; border-radius: 8px;
+  padding: 6px; z-index: 999; min-width: 170px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+}
+.dp-editor-filter-popover.is-open { display: flex; flex-direction: column; gap: 2px; }
+.dp-editor-filter-option {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: #e3e6ee;
+}
+.dp-editor-filter-option:hover { background: rgba(0,209,178,0.12); }
+.dp-editor-filter-option input[type="checkbox"] { accent-color: #00d1b2; cursor: pointer; }
+/* Auto Drive-search toggle switch */
+.dp-toggle-wrap {
+  position: relative; display: inline-block;
+  width: 34px; height: 18px; flex-shrink: 0; cursor: pointer;
+}
+.dp-toggle-input {
+  appearance: none; -webkit-appearance: none;
+  position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer;
+}
+.dp-toggle-slider {
+  position: absolute; inset: 0; pointer-events: none;
+  background: #262a38; border: 1px solid #353b4d; border-radius: 18px;
+  transition: background-color .15s, border-color .15s;
+}
+.dp-toggle-slider::before {
+  content: ""; position: absolute; left: 2px; top: 2px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #9aa0ad; transition: transform .15s, background-color .15s;
+}
+.dp-toggle-input:hover + .dp-toggle-slider { border-color: #00d1b2; }
+.dp-toggle-input:checked + .dp-toggle-slider {
+  background: rgba(0,209,178,0.22); border-color: #00d1b2;
+}
+.dp-toggle-input:checked + .dp-toggle-slider::before {
+  transform: translateX(16px); background: #00d1b2;
+}
+.dp-filter-tools { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.dp-filter-clear { background: none; border: none; color: #9aa0ad; text-decoration: underline; cursor: pointer; font-size: 0.8rem; white-space: nowrap; }
+.dp-filter-counter { color: #6b7280; font-size: 0.8rem; white-space: nowrap; }
+
+/* Dashboard open button */
+.dp-dash-open-btn {
+  background: rgba(0,209,178,0.15); border: 1px solid #00d1b2;
+  color: #00d1b2; border-radius: 8px; padding: 5px 12px;
+  font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.dp-dash-open-btn:hover { background: rgba(0,209,178,0.3); }
+
+/* Dashboard modal */
+.dp-dash-modal { width: 620px; min-width: 460px; max-width: 700px; max-height: 82vh; display: flex; flex-direction: column; }
+.dp-dash-scope-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
+.dp-dash-summary { font-size: 0.78rem; color: #6b7280; margin-bottom: 14px; line-height: 1.4; }
+.dp-dash-date-text { color: #9aa0ad; }
+.dp-dash-clock { color: #00d1b2; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dp-dash-quick-report { margin: 12px 0 4px; }
+.dp-dash-quick-report .dp-dash-subheading { margin-top: 0; }
+.dp-dash-body { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px; padding-right: 2px; }
+
+.dp-dash-editor-card {
+  background: #20242f; border: 1px solid #2b2f3d; border-radius: 10px; padding: 12px 14px;
+}
+.dp-dash-editor-header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
+}
+.dp-dash-editor-name { font-size: 0.92rem; font-weight: 700; color: #e3e6ee; }
+.dp-dash-editor-total {
+  font-size: 0.75rem; font-weight: 700; color: #00d1b2;
+  background: rgba(0,209,178,0.15); border-radius: 10px; padding: 2px 9px;
+}
+.dp-dash-editor-latest {
+  font-size: 0.75rem; color: #9aa0ad; font-style: italic; margin-bottom: 10px;
+}
+
+.dp-dash-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.dp-dash-table th, .dp-dash-table td {
+  padding: 5px 6px; text-align: center; border-bottom: 1px solid #2b2f3d;
+}
+.dp-dash-table th { color: #6b7280; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.dp-dash-table thead th:first-child { text-align: left; }
+.dp-dash-status-label { text-align: left; color: #c7cbd8; white-space: nowrap; }
+.dp-dash-row-total { font-weight: 700; color: #e3e6ee; }
+.dp-dash-table tfoot td { border-bottom: none; border-top: 2px solid #353b4d; font-weight: 700; color: #00d1b2; }
+.dp-dash-table tfoot td:first-child { text-align: left; }
+
+/* Clickable count cells — any non-zero Completed/Pending/On Hold/Rejected/
+   Total number opens a modal listing the refs behind it. */
+.dp-dash-stat-btn {
+  background: none; border: none; padding: 1px 5px; border-radius: 5px;
+  color: inherit; font: inherit; font-weight: inherit; cursor: pointer;
+  text-decoration: underline dotted rgba(255,255,255,0.35); text-underline-offset: 2px;
+}
+.dp-dash-stat-btn:hover { background: rgba(0,209,178,0.16); color: #00d1b2; text-decoration-color: #00d1b2; }
+.dp-dash-row-total .dp-dash-stat-btn, .dp-dash-table tfoot .dp-dash-stat-btn { color: inherit; }
+
+/* Reference list modal — stacks on top of the dashboard modal. */
+.dp-refs-modal { max-height: 80vh; display: flex; flex-direction: column; }
+.dp-refs-list {
+  overflow-y: auto; max-height: 320px; margin-bottom: 14px;
+  border: 1px solid #2b2f3d; border-radius: 8px;
+}
+.dp-refs-list-item {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px; width: 100%; box-sizing: border-box;
+  padding: 10px 14px; font-size: 0.85rem; color: #e3e6ee;
+  border: none; border-bottom: 1px solid #2b2f3d; background: none;
+  text-align: left; cursor: pointer; font-family: inherit;
+  transition: background-color .15s;
+}
+.dp-refs-list-item:last-child { border-bottom: none; }
+.dp-refs-list-item:hover { background: rgba(0,209,178,0.1); }
+.dp-refs-list-item:active { background: rgba(0,209,178,0.18); }
+.dp-refs-list-item.is-busy { cursor: default; opacity: 0.75; }
+.dp-refs-list-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dp-refs-list-action {
+  flex-shrink: 0 !important;
+  margin-left: auto; /* fallback in case justify-content ever gets overridden */
+  font-size: 0.72rem; font-weight: 600; color: #6b7280; white-space: nowrap;
+  padding: 4px 10px; border-radius: 6px; border: 1px solid transparent;
+  transition: color .15s, border-color .15s, background-color .15s;
+}
+.dp-refs-list-item:hover .dp-refs-list-action {
+  color: #00d1b2; border-color: rgba(0,209,178,0.4); background: rgba(0,209,178,0.1);
+}
+.dp-modal-cancel:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Bedroom sub-table (Upload Pending only) — visually lighter/smaller than
+   the main Completed/Pending/Rejected table so it reads as supplementary. */
+.dp-dash-subheading {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: #6b7280; margin: 12px 0 6px;
+}
+.dp-dash-bed-table { font-size: 0.74rem; opacity: 0.92; }
+.dp-dash-bed-table th, .dp-dash-bed-table td { padding: 4px 5px; }
+
+/* Whole-team overview card — same shape as an editor card but with an
+   accent border so it stands out as the top-level summary. */
+.dp-dash-team-card {
+  border-color: rgba(0,209,178,0.4);
+  box-shadow: 0 0 0 1px rgba(0,209,178,0.08);
+}
+.dp-dash-team-card .dp-dash-editor-name { color: #00d1b2; }
+
+/* Unassigned (on hold) card — purple accent, matching the app's existing
+   on-hold color used elsewhere (badges, hold button, modal). */
+.dp-dash-unassigned-card {
+  border-color: rgba(149,117,205,0.4);
+  box-shadow: 0 0 0 1px rgba(149,117,205,0.08);
+}
+.dp-dash-unassigned-card .dp-dash-editor-name { color: #b39ddb; }
+.dp-dash-unassigned-card .dp-dash-editor-total { color: #b39ddb; background: rgba(149,117,205,0.15); }
+
+/* ── History button ──────────────────────────────────────────────────── */
+.dp-history-btn {
+  background: #262a38 !important; border: 1px solid #353b4d !important; color: #9aa0ad !important;
+  border-radius: 6px !important; width: 26px !important; height: 26px !important; flex: 0 0 auto;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+  cursor: pointer; padding: 0; box-sizing: border-box;
+}
+.dp-history-btn:hover { border-color: #00d1b2 !important; color: #00d1b2 !important; }
+
+/* ── Copy-ref button ──────────────────────────────────────────────────── */
+.dp-copyref-btn {
+  background: #262a38 !important; border: 1px solid #353b4d !important; color: #9aa0ad !important;
+  border-radius: 6px !important; width: 26px !important; height: 26px !important; flex: 0 0 auto;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+  cursor: pointer; padding: 0; box-sizing: border-box; transition: background-color .15s, border-color .15s, color .15s;
+}
+.dp-copyref-btn:hover { border-color: #00d1b2 !important; color: #00d1b2 !important; }
+.dp-copyref-btn.is-copied {
+  border-color: #00d1b2 !important; color: #00d1b2 !important; background: rgba(0,209,178,0.18) !important;
+}
+
+/* ── History modal ───────────────────────────────────────────────────── */
+.dp-history-modal { min-width: 320px; max-width: 420px; }
+
+.dp-history-header { margin-bottom: 16px; }
+.dp-history-sub {
+  font-size: 0.78rem; color: #6b7280; margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.dp-history-empty {
+  color: #6b7280; font-size: 0.85rem; padding: 12px 0; text-align: center;
+}
+
+/* ── Timeline ────────────────────────────────────────────────────────── */
+.dp-timeline { display: flex; flex-direction: column; }
+
+.dp-timeline-row {
+  display: flex; gap: 14px; align-items: flex-start; min-height: 48px;
+}
+
+.dp-timeline-dot-wrap {
+  display: flex; flex-direction: column; align-items: center;
+  flex: 0 0 auto; padding-top: 3px;
+}
+.dp-timeline-dot {
+  width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
+  border: 2px solid currentColor;
+}
+.dp-dot-assigned    { color: #e6941a; background: rgba(230,148,26,0.2); }
+.dp-dot-started     { color: #00d1b2; background: rgba(0,209,178,0.2); }
+.dp-dot-onhold      { color: #b39ddb; background: rgba(179,157,219,0.2); }
+.dp-dot-completed   { color: #00d1b2; background: rgba(0,209,178,0.3); }
+.dp-dot-rejected    { color: #ef9a9a; background: rgba(239,154,154,0.2); }
+.dp-dot-reassigned  { color: #f472b6; background: rgba(244,114,182,0.2); }
+.dp-dot-downloaded  { color: #60a5fa; background: rgba(96,165,250,0.2); }
+
+.dp-timeline-line {
+  width: 2px; flex: 1; background: #2b2f3d; margin-top: 4px; min-height: 20px;
+}
+
+.dp-timeline-content {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-bottom: 12px; flex: 1;
+}
+.dp-timeline-label { font-size: 0.85rem; font-weight: 700; }
+.dp-timeline-time  { font-size: 0.78rem; color: #9aa0ad; }
+.dp-timeline-detail { font-size: 0.78rem; color: #6b7280; font-style: italic; }
+
+.dp-history-loading {
+  color: #6b7280; font-size: 0.85rem; padding: 16px 0; text-align: center;
+}
+.dp-history-body { min-height: 40px; }
+
+/* Row status border+tint (assigned/in-progress/on-hold/rejected/completed)
+   is applied via inline !important styles in JS, not here — the CRM's own
+   stylesheet sets background-color/box-shadow on .table-row with matching
+   specificity in both light and dark mode, so an external rule here would
+   lose the cascade. See ROW_STATUS_COLORS / applyRowStatusStyle in
+   assigner-content.js. */
