@@ -998,6 +998,45 @@
     });
   }
 
+  // Auto-reopens a Rejected listing once the CRM's own category genuinely
+  // advances (e.g. a reshoot's photos land in Upload Pending after a
+  // rejection). The Apps Script side (reopenOnCategoryChange) has always
+  // been able to do this — it's wired all the way through background.js —
+  // but nothing ever actually called it from here, so a rejected listing
+  // just sat showing "Rejected" forever even after real new photos showed
+  // up. syncMetaIfNeeded above deliberately won't help with this: once a
+  // category is captured it's locked in for good, by design, so the only
+  // way to notice "this category actually changed" is to compare the
+  // *live* DOM value against what's on file every pass, which is exactly
+  // what this does.
+  function maybeReopenOnRecategorize(ref, liveCrmStatus, title) {
+    if (!ref || !liveCrmStatus) return;
+    const entry = assignmentCache[ref];
+    if (!entry || entry.status !== "Rejected") return;
+    if (!CATEGORY_OPTIONS.includes(liveCrmStatus)) return;
+    if (liveCrmStatus === entry.crmStatus) return; // nothing's actually changed
+
+    const key = "reopen:" + liveCrmStatus;
+    if (metaSyncCache[ref] === key) return; // already attempted this exact transition
+    metaSyncCache[ref] = key;
+
+    safeSendMessage(
+      { type: "DP_REOPEN_ON_RECATEGORIZE", ref, newCategory: liveCrmStatus, title: title || entry.title || "" },
+      resp => {
+        if (!(resp && resp.ok && resp.data && resp.data.reopened)) {
+          metaSyncCache[ref] = ""; // let the next pass retry (e.g. no name selected yet)
+          return;
+        }
+        // Reflect it locally right away rather than waiting up to 15s for
+        // the next poll — same lastLocalChangeAt protection every other
+        // optimistic update here uses, so a stale poll can't clobber it.
+        assignmentCache[ref] = { ...entry, editor: "", status: "Unassigned", crmStatus: liveCrmStatus };
+        lastLocalChangeAt[ref] = Date.now();
+        processRows();
+      }
+    );
+  }
+
   function processRows() {
     const rows = getAllRows();
     rows.forEach(row => {
@@ -1015,6 +1054,7 @@
       else delete row.dataset.dpCrmStatus;
 
       syncMetaIfNeeded(ref, bucket, crmStatus, extractTitle(row));
+      maybeReopenOnRecategorize(ref, crmStatus, extractTitle(row));
 
       const inner = row.querySelector(".table-row-inner.is-dropdown");
       if (!inner) return;
