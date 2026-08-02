@@ -29,11 +29,11 @@
   // external stylesheet rule regardless of theme, so we set it directly
   // on the element instead of fighting the CRM's selector.
   const ROW_STATUS_COLORS = {
-    assigned:   { border: "#e6941a", tint: "rgba(230, 148, 26, 0.20)" },
-    inprogress: { border: "#3b82f6", tint: "rgba(59, 130, 246, 0.20)" },
-    onhold:     { border: "#b39ddb", tint: "rgba(179, 157, 219, 0.20)" },
-    rejected:   { border: "#ef5350", tint: "rgba(239, 83, 80, 0.20)" },
-    completed:  { border: "#00d1b2", tint: "rgba(0, 209, 178, 0.20)" },
+    assigned:   { border: "#e6941a", tint: "rgba(230, 148, 26, 0.10)" },
+    inprogress: { border: "#3b82f6", tint: "rgba(59, 130, 246, 0.10)" },
+    onhold:     { border: "#b39ddb", tint: "rgba(179, 157, 219, 0.10)" },
+    rejected:   { border: "#ef5350", tint: "rgba(239, 83, 80, 0.10)" },
+    completed:  { border: "#00d1b2", tint: "rgba(0, 209, 178, 0.10)" },
   };
   // "Unassigned" is a real Status value now stored in the sheet (so history
   // is preserved instead of deleting the row — see unassign()), but for
@@ -2345,148 +2345,156 @@
 
     document.body.appendChild(overlay);
 
-    // Fetch directly from the sheet — bypasses the service worker message
-    // channel so the callback is guaranteed to fire even if the background
-    // worker has gone idle. Content scripts can reach script.google.com
-    // because it is listed in the manifest host_permissions.
-    const historyUrl = `${SHEET_URL}?token=${encodeURIComponent(SHEET_TOKEN)}`;
-    console.log(`DP History: searching sheet for ref="${ref}" (refCode="${refCode}")`);
-    fetch(historyUrl)
-      .then(r => r.json())
-      .then(data => {
-        body.innerHTML = "";
+    // Renders the timeline from a given entry (or null for the empty
+    // state) — pulled out into its own function so both the instant
+    // in-memory path and the network-fallback path below can share it.
+    function renderTimeline(entry) {
+      body.innerHTML = "";
 
-        let entry = null;
-        if (data && Array.isArray(data.assignments)) {
-          console.log(`DP History: sheet returned ${data.assignments.length} rows. Looking for ref="${ref}"`);
-          const match = data.assignments.find(a => a.ref === ref);
-          if (match) {
-            console.log("DP History: match found →", match);
-            entry = match;
-            // Sync into the local cache so the list view stays up to date
-            if (ref) {
-              assignmentCache[ref] = {
-                editor:         match.editor         || "",
-                status:         match.status         || "",
-                title:          match.title          || "",
-                assignedAt:     match.assignedAt     || "",
-                startedAt:      match.startedAt      || "",
-                completedAt:    match.completedAt    || "",
-                rejectedAt:     match.rejectedAt     || "",
-                onHoldAt:       match.onHoldAt       || "",
-                onHoldReason:   match.onHoldReason   || "",
-                assignedBy:     match.assignedBy     || "",
-                reassignedFrom: match.reassignedFrom || "",
-                reassignedTo:   match.reassignedTo   || "",
-                reassignedBy:   match.reassignedBy   || "",
-                reassignedAt:   match.reassignedAt   || "",
-                bedrooms:       match.bedrooms        || "",
-                crmStatus:      match.crmStatus       || "",
-                downloadedAt:   match.downloadedAt    || "",
-              };
-            }
+      const timeline = document.createElement("div");
+      timeline.className = "dp-timeline";
+
+      const events = [
+        {
+          key: "assignedAt", label: "Assigned", color: "#e6941a", dot: "assigned",
+          detail: entry
+            ? [
+                entry.editor     ? `To: ${entry.editor}`     : null,
+                entry.assignedBy ? `By: ${entry.assignedBy}` : null,
+              ].filter(Boolean).join("  \u00b7  ") || null
+            : null,
+        },
+        { key: "startedAt",   label: "Started",   color: "#00d1b2", dot: "started",   detail: null },
+        {
+          key: "onHoldAt", label: "On Hold", color: "#b39ddb", dot: "onhold",
+          detail: entry && entry.onHoldReason ? `Reason: ${entry.onHoldReason}` : null,
+        },
+        { key: "completedAt", label: "Completed", color: "#4ade80", dot: "completed", detail: null },
+        { key: "rejectedAt",  label: "Rejected",  color: "#ef9a9a", dot: "rejected",  detail: null },
+        { key: "downloadedAt", label: "Downloaded", color: "#60a5fa", dot: "downloaded", detail: null },
+      ];
+
+      // Reassign event — built from the flat sheet columns (most recent reassignment).
+      const reassignEvent = (entry && entry.reassignedAt)
+        ? [{
+            label:  "Reassigned",
+            color:  "#f472b6",
+            dot:    "reassigned",
+            ts:     entry.reassignedAt,
+            detail: [
+              entry.reassignedFrom && entry.reassignedTo
+                ? `${entry.reassignedFrom} \u2192 ${entry.reassignedTo}` : null,
+              entry.reassignedBy ? `By: ${entry.reassignedBy}` : null,
+            ].filter(Boolean).join("  \u00b7  ") || null,
+          }]
+        : [];
+
+      const activeEvents = [
+        ...events.map(ev => ({ ...ev, ts: entry && entry[ev.key] ? entry[ev.key] : null })),
+        ...reassignEvent,
+      ]
+        .filter(ev => ev.ts)
+        .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+      if (activeEvents.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "dp-history-empty";
+        empty.textContent = "No history tracked yet for this listing.";
+        timeline.appendChild(empty);
+      } else {
+        activeEvents.forEach((ev, i) => {
+          const row = document.createElement("div");
+          row.className = "dp-timeline-row";
+
+          const dotWrap = document.createElement("div");
+          dotWrap.className = "dp-timeline-dot-wrap";
+          const dot = document.createElement("div");
+          dot.className = `dp-timeline-dot dp-dot-${ev.dot}`;
+          dotWrap.appendChild(dot);
+          if (i < activeEvents.length - 1) {
+            const line = document.createElement("div");
+            line.className = "dp-timeline-line";
+            dotWrap.appendChild(line);
           }
-        }
+          row.appendChild(dotWrap);
 
-        const timeline = document.createElement("div");
-        timeline.className = "dp-timeline";
+          const content = document.createElement("div");
+          content.className = "dp-timeline-content";
+          const labelEl = document.createElement("span");
+          labelEl.className = "dp-timeline-label";
+          labelEl.textContent = ev.label;
+          labelEl.style.color = ev.color;
+          content.appendChild(labelEl);
+          const timeEl = document.createElement("span");
+          timeEl.className = "dp-timeline-time";
+          timeEl.textContent = fmtDT(ev.ts);
+          content.appendChild(timeEl);
+          if (ev.detail) {
+            const detailEl = document.createElement("span");
+            detailEl.className = "dp-timeline-detail";
+            detailEl.textContent = ev.detail;
+            content.appendChild(detailEl);
+          }
+          row.appendChild(content);
+          timeline.appendChild(row);
+        });
+      }
 
-        const events = [
-          {
-            key: "assignedAt", label: "Assigned", color: "#e6941a", dot: "assigned",
-            detail: entry
-              ? [
-                  entry.editor     ? `To: ${entry.editor}`     : null,
-                  entry.assignedBy ? `By: ${entry.assignedBy}` : null,
-                ].filter(Boolean).join("  ·  ") || null
-              : null,
-          },
-          { key: "startedAt",   label: "Started",   color: "#00d1b2", dot: "started",   detail: null },
-          {
-            key: "onHoldAt", label: "On Hold", color: "#b39ddb", dot: "onhold",
-            detail: entry && entry.onHoldReason ? `Reason: ${entry.onHoldReason}` : null,
-          },
-          { key: "completedAt", label: "Completed", color: "#4ade80", dot: "completed", detail: null },
-          { key: "rejectedAt",  label: "Rejected",  color: "#ef9a9a", dot: "rejected",  detail: null },
-          { key: "downloadedAt", label: "Downloaded", color: "#60a5fa", dot: "downloaded", detail: null },
-        ];
+      body.appendChild(timeline);
+    }
 
-        // Reassign event — built from the flat sheet columns (most recent reassignment).
-        const reassignEvent = (entry && entry.reassignedAt)
-          ? [{
-              label:  "Reassigned",
-              color:  "#f472b6",
-              dot:    "reassigned",
-              ts:     entry.reassignedAt,
-              detail: [
-                entry.reassignedFrom && entry.reassignedTo
-                  ? `${entry.reassignedFrom} → ${entry.reassignedTo}` : null,
-                entry.reassignedBy ? `By: ${entry.reassignedBy}` : null,
-              ].filter(Boolean).join("  ·  ") || null,
-            }]
-          : [];
+    // Instant path — this exact data (every field the timeline above
+    // reads) is already sitting in assignmentCache from the regular 15s
+    // poll. This is what was taking 10-60s before: a raw fetch() straight
+    // to Apps Script for the ENTIRE assignments sheet, with no timeout at
+    // all, every single time the modal opened — even though nothing here
+    // needed data that wasn't already in memory. No network call, no
+    // loading state needed, in the common case.
+    if (ref && assignmentCache[ref]) {
+      console.log(`DP History: using in-memory data for ref="${ref}" — no fetch needed`);
+      renderTimeline(assignmentCache[ref]);
+      return;
+    }
 
-        const activeEvents = [
-          ...events.map(ev => ({ ...ev, ts: entry && entry[ev.key] ? entry[ev.key] : null })),
-          ...reassignEvent,
-        ]
-          .filter(ev => ev.ts)
-          .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-
-        if (activeEvents.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "dp-history-empty";
-          empty.textContent = "No history tracked yet for this listing.";
-          timeline.appendChild(empty);
-        } else {
-          activeEvents.forEach((ev, i) => {
-            const row = document.createElement("div");
-            row.className = "dp-timeline-row";
-
-            const dotWrap = document.createElement("div");
-            dotWrap.className = "dp-timeline-dot-wrap";
-            const dot = document.createElement("div");
-            dot.className = `dp-timeline-dot dp-dot-${ev.dot}`;
-            dotWrap.appendChild(dot);
-            if (i < activeEvents.length - 1) {
-              const line = document.createElement("div");
-              line.className = "dp-timeline-line";
-              dotWrap.appendChild(line);
-            }
-            row.appendChild(dotWrap);
-
-            const content = document.createElement("div");
-            content.className = "dp-timeline-content";
-            const labelEl = document.createElement("span");
-            labelEl.className = "dp-timeline-label";
-            labelEl.textContent = ev.label;
-            labelEl.style.color = ev.color;
-            content.appendChild(labelEl);
-            const timeEl = document.createElement("span");
-            timeEl.className = "dp-timeline-time";
-            timeEl.textContent = fmtDT(ev.ts);
-            content.appendChild(timeEl);
-            if (ev.detail) {
-              const detailEl = document.createElement("span");
-              detailEl.className = "dp-timeline-detail";
-              detailEl.textContent = ev.detail;
-              content.appendChild(detailEl);
-            }
-            row.appendChild(content);
-            timeline.appendChild(row);
-          });
-        }
-
-        body.appendChild(timeline);
-      })
-      .catch(err => {
+    // Fallback — only reached for a ref the local cache genuinely doesn't
+    // have yet (e.g. brand new, first poll hasn't landed). Routed through
+    // the same timeout-protected message channel every other request in
+    // this file uses, instead of a raw fetch with no cutoff at all.
+    console.log(`DP History: "${ref}" not in local cache yet, falling back to a fresh fetch`);
+    safeSendMessage({ type: "DP_GET_ALL" }, resp => {
+      if (!(resp && resp.ok && resp.data && Array.isArray(resp.data.assignments))) {
         body.innerHTML = "";
         const errEl = document.createElement("div");
         errEl.className = "dp-history-empty";
-        errEl.textContent = `Could not load history: ${err.message || err}`;
+        errEl.textContent = `Could not load history: ${(resp && resp.error) || "unknown error"}`;
         body.appendChild(errEl);
-        console.log("DP history fetch failed:", err);
-      });
+        return;
+      }
+
+      const match = resp.data.assignments.find(a => a.ref === ref);
+      if (match && ref) {
+        assignmentCache[ref] = {
+          editor:         match.editor         || "",
+          status:         match.status         || "",
+          title:          match.title          || "",
+          assignedAt:     match.assignedAt     || "",
+          startedAt:      match.startedAt      || "",
+          completedAt:    match.completedAt    || "",
+          rejectedAt:     match.rejectedAt     || "",
+          onHoldAt:       match.onHoldAt       || "",
+          onHoldReason:   match.onHoldReason   || "",
+          assignedBy:     match.assignedBy     || "",
+          reassignedFrom: match.reassignedFrom || "",
+          reassignedTo:   match.reassignedTo   || "",
+          reassignedBy:   match.reassignedBy   || "",
+          reassignedAt:   match.reassignedAt   || "",
+          bedrooms:       match.bedrooms        || "",
+          crmStatus:      match.crmStatus       || "",
+          downloadedAt:   match.downloadedAt    || "",
+        };
+      }
+      renderTimeline(match || null);
+    });
   }
 
   function extractDetailPageRef() {

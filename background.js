@@ -42,6 +42,47 @@ function fetchWithTimeout(url, options) {
     });
 }
 
+// ── Delayed CRM tab refresh after an extension reload ───────────────────
+// reload.js sets dpPendingTabRefresh right before calling
+// chrome.runtime.reload() — that call tears down reload.js's own execution
+// context almost immediately, so a setTimeout placed there would very
+// likely never fire. This top-level code, on the other hand, always runs
+// fresh every time the service worker starts — including right after a
+// reload — so it's the reliable place to pick the flag back up and do the
+// actual (intentionally delayed) tab refresh.
+const CRM_TAB_REFRESH_DELAY_SEC = 5;
+
+chrome.storage.local.get(["dpPendingTabRefresh"], result => {
+  const requestedAt = result && result.dpPendingTabRefresh;
+  if (!requestedAt) return;
+  // Ignore a stale/leftover flag (e.g. from a crash before it got cleared)
+  // rather than firing an unexpected tab refresh long after the fact.
+  if (Date.now() - requestedAt > 60000) {
+    chrome.storage.local.remove("dpPendingTabRefresh");
+    return;
+  }
+  chrome.storage.local.remove("dpPendingTabRefresh");
+
+  chrome.tabs.query({ url: "https://newcrm.drivenproperties.com/*" }, tabs => {
+    // Show the countdown toast (handled by identity-guard.js, which loads
+    // on every CRM page) right away, so the countdown displayed actually
+    // matches the real delay below — not a separate fake timer that could
+    // drift out of sync with when the tab genuinely reloads. A tab with no
+    // listener yet (e.g. mid-navigation) just silently ignores the
+    // message — sendMessage failures here are non-fatal either way.
+    tabs.forEach(tab => {
+      if (tab.id === undefined) return;
+      chrome.tabs.sendMessage(tab.id, { type: "DP_SHOW_REFRESH_COUNTDOWN", seconds: CRM_TAB_REFRESH_DELAY_SEC }, () => void chrome.runtime.lastError);
+    });
+
+    setTimeout(() => {
+      tabs.forEach(tab => {
+        if (tab.id !== undefined) chrome.tabs.reload(tab.id);
+      });
+    }, CRM_TAB_REFRESH_DELAY_SEC * 1000);
+  });
+});
+
 // Role is derived from the name the person picks in the popup (see
 // NAME_ROLES in popup.js) — this extension is shared by seniors and
 // juniors alike, so we never hardcode everyone to "senior" here.

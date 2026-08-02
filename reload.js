@@ -1,16 +1,11 @@
 // Triggers a full reload of this extension from disk (picks up updated
-// files), and refreshes every currently-open CRM tab too, so nobody has
-// to manually reload each tab to pick up the new content-script version.
-
-chrome.tabs.query({ url: "https://newcrm.drivenproperties.com/*" }, (tabs) => {
-  tabs.forEach(tab => {
-    if (tab.id !== undefined) chrome.tabs.reload(tab.id);
-  });
-
-  // Reload the extension itself only after kicking off the tab reloads
-  // above — chrome.runtime.reload() tears down this very page's own
-  // execution context almost immediately, so anything that needs to run
-  // has to be queued before this call, not after.
+// files). The actual CRM tab refresh happens ~2s *after* the extension
+// restarts, not here — see the pendingTabRefresh handling in background.js.
+// (A setTimeout placed after chrome.runtime.reload() in this same script
+// would very likely never fire: that call tears down this page's own
+// execution context almost immediately, so the delayed step has to live
+// somewhere that survives the reload instead.)
+chrome.storage.local.set({ dpPendingTabRefresh: Date.now() }, () => {
   chrome.runtime.reload();
 });
 
