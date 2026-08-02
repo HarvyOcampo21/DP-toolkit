@@ -64,22 +64,36 @@ chrome.storage.local.get(["dpPendingTabRefresh"], result => {
   chrome.storage.local.remove("dpPendingTabRefresh");
 
   chrome.tabs.query({ url: "https://newcrm.drivenproperties.com/*" }, tabs => {
-    // Show the countdown toast (handled by identity-guard.js, which loads
-    // on every CRM page) right away, so the countdown displayed actually
-    // matches the real delay below — not a separate fake timer that could
-    // drift out of sync with when the tab genuinely reloads. A tab with no
-    // listener yet (e.g. mid-navigation) just silently ignores the
-    // message — sendMessage failures here are non-fatal either way.
-    tabs.forEach(tab => {
-      if (tab.id === undefined) return;
-      chrome.tabs.sendMessage(tab.id, { type: "DP_SHOW_REFRESH_COUNTDOWN", seconds: CRM_TAB_REFRESH_DELAY_SEC }, () => void chrome.runtime.lastError);
-    });
+    if (tabs.length === 0) return; // nothing open to refresh, nothing to ask
 
-    setTimeout(() => {
+    // Ask once, on whichever tab is currently active (falling back to the
+    // first match) — not once per open CRM tab. Someone might have several
+    // open (e.g. deliberately keeping one aside to avoid losing in-progress
+    // data on it), and a single yes/no decision should apply to all of
+    // them rather than prompting repeatedly for the same thing.
+    const targetTab = tabs.find(t => t.active) || tabs[0];
+    if (targetTab.id === undefined) return;
+
+    chrome.tabs.sendMessage(targetTab.id, { type: "DP_CONFIRM_REFRESH_TABS", tabCount: tabs.length }, response => {
+      // No listener on that tab (e.g. it navigated away in the interim) or
+      // no response at all — safest is to do nothing rather than force a
+      // refresh nobody actually agreed to.
+      if (chrome.runtime.lastError || !response || !response.confirmed) return;
+
+      // Confirmed — show the live countdown (matching the real delay
+      // below, not a separate fake timer) on every matching tab, then
+      // reload them all once it elapses.
       tabs.forEach(tab => {
-        if (tab.id !== undefined) chrome.tabs.reload(tab.id);
+        if (tab.id === undefined) return;
+        chrome.tabs.sendMessage(tab.id, { type: "DP_SHOW_REFRESH_COUNTDOWN", seconds: CRM_TAB_REFRESH_DELAY_SEC }, () => void chrome.runtime.lastError);
       });
-    }, CRM_TAB_REFRESH_DELAY_SEC * 1000);
+
+      setTimeout(() => {
+        tabs.forEach(tab => {
+          if (tab.id !== undefined) chrome.tabs.reload(tab.id);
+        });
+      }, CRM_TAB_REFRESH_DELAY_SEC * 1000);
+    });
   });
 });
 

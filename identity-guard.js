@@ -136,9 +136,142 @@
     }, 1000);
   }
 
-  chrome.runtime.onMessage.addListener(message => {
+  // Small reminder toast for when the person says "no" to auto-refresh —
+  // e.g. because they deliberately kept a CRM tab open to avoid losing
+  // in-progress data on it. Amber, not red — this isn't an error, just a
+  // "don't forget" nudge, and it stays up long enough to actually notice
+  // (10s) rather than the 5s used for routine confirmations elsewhere.
+  function showManualRefreshReminder() {
+    const existing = document.getElementById("dp-manual-refresh-toast");
+    if (existing) existing.remove();
+
+    const dark = isSiteDarkMode();
+    const toast = document.createElement("div");
+    toast.id = "dp-manual-refresh-toast";
+    toast.textContent = "⚠️ Remember to manually refresh your open CRM tab(s) to get the latest DP Toolkit update.";
+
+    Object.assign(toast.style, {
+      position: "fixed",
+      bottom: "20px",
+      right: "30px",
+      background: dark ? "#3b2f14" : "#fef3c7",
+      color: dark ? "#fbbf24" : "#92400e",
+      padding: "12px 16px",
+      borderRadius: "8px",
+      fontWeight: "600",
+      fontSize: "13px",
+      lineHeight: "1.4",
+      zIndex: "2147483647",
+      maxWidth: "320px",
+      boxShadow: dark ? "0 6px 20px rgba(0,0,0,.6)" : "0 6px 20px rgba(0,0,0,.35)",
+      opacity: "0",
+      transform: "translateY(12px)",
+      transition: "opacity .3s ease-out, transform .3s ease-out",
+      fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+    });
+
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.style.opacity = "1";
+      toast.style.transform = "translateY(0)";
+    });
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(12px)";
+    }, 9500);
+    setTimeout(() => toast.remove(), 10000);
+  }
+
+  // Asks whether to auto-refresh all open CRM tabs after an extension
+  // update, rather than doing it unconditionally — someone may have a tab
+  // open on purpose (e.g. mid-edit on a form) and auto-reloading it would
+  // lose that. A custom non-blocking card, not a real confirm() — that
+  // would freeze the whole page, which is a worse experience than the
+  // thing it's trying to prevent. onResponse is called with true/false.
+  function showRefreshConfirm(tabCount, onResponse) {
+    const existing = document.getElementById("dp-refresh-confirm-toast");
+    if (existing) existing.remove();
+
+    const dark = isSiteDarkMode();
+    const card = document.createElement("div");
+    card.id = "dp-refresh-confirm-toast";
+
+    Object.assign(card.style, {
+      position: "fixed",
+      bottom: "20px",
+      right: "30px",
+      background: dark ? "#0f2e2b" : "#e6fbf7",
+      color: dark ? "#5eead4" : "#0f766e",
+      padding: "14px 16px",
+      borderRadius: "10px",
+      fontSize: "13px",
+      lineHeight: "1.4",
+      zIndex: "2147483647",
+      maxWidth: "320px",
+      boxShadow: dark ? "0 6px 20px rgba(0,0,0,.6)" : "0 6px 20px rgba(0,0,0,.35)",
+      opacity: "0",
+      transform: "translateY(12px)",
+      transition: "opacity .3s ease-out, transform .3s ease-out",
+      fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+    });
+
+    const msg = document.createElement("div");
+    msg.style.fontWeight = "600";
+    msg.style.marginBottom = "10px";
+    const plural = tabCount === 1 ? "tab" : "tabs";
+    msg.textContent = `🔄 DP Toolkit updated. Refresh ${tabCount} open CRM ${plural} now?`;
+    card.appendChild(msg);
+
+    const btnRow = document.createElement("div");
+    Object.assign(btnRow.style, { display: "flex", gap: "8px" });
+
+    function respond(confirmed) {
+      card.style.opacity = "0";
+      card.style.transform = "translateY(12px)";
+      setTimeout(() => card.remove(), 300);
+      onResponse(confirmed);
+      if (!confirmed) showManualRefreshReminder();
+    }
+
+    const yesBtn = document.createElement("button");
+    yesBtn.type = "button";
+    yesBtn.textContent = "Yes, refresh";
+    Object.assign(yesBtn.style, {
+      flex: "1", padding: "7px 10px", borderRadius: "6px", border: "none",
+      background: dark ? "#5eead4" : "#0f766e", color: dark ? "#0f2e2b" : "#fff",
+      fontWeight: "700", fontSize: "12.5px", cursor: "pointer",
+    });
+    yesBtn.addEventListener("click", () => respond(true));
+
+    const noBtn = document.createElement("button");
+    noBtn.type = "button";
+    noBtn.textContent = "No, I'll do it myself";
+    Object.assign(noBtn.style, {
+      flex: "1", padding: "7px 10px", borderRadius: "6px",
+      border: `1px solid ${dark ? "#5eead4" : "#0f766e"}`, background: "transparent",
+      color: dark ? "#5eead4" : "#0f766e", fontWeight: "700", fontSize: "12.5px", cursor: "pointer",
+    });
+    noBtn.addEventListener("click", () => respond(false));
+
+    btnRow.appendChild(yesBtn);
+    btnRow.appendChild(noBtn);
+    card.appendChild(btnRow);
+
+    document.body.appendChild(card);
+    requestAnimationFrame(() => {
+      card.style.opacity = "1";
+      card.style.transform = "translateY(0)";
+    });
+  }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message && message.type === "DP_SHOW_REFRESH_COUNTDOWN") {
       showRefreshCountdown(message.seconds || 5);
+      return; // no response needed
+    }
+    if (message && message.type === "DP_CONFIRM_REFRESH_TABS") {
+      showRefreshConfirm(message.tabCount || 1, confirmed => sendResponse({ confirmed }));
+      return true; // keep the message channel open for the async button click
     }
   });
 
