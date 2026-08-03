@@ -18,6 +18,32 @@
 // exactly the thing the reload just invalidated, so a message sent to it
 // at that moment never has a listener there to receive it.
 
+// What's new, per version — shown on the "reload now?" step for every
+// version newer than whatever's currently running, so someone who hasn't
+// updated in a while sees everything they've missed, not just the latest
+// entry. Add a new entry here each time a real change ships. Keep these
+// short and in plain, user-facing language (what changed / why it helps),
+// not implementation detail.
+const CHANGELOG = [
+  { version: 20, notes: [
+    "Listings now show a colored border/background based on status (assigned, in progress, on hold, rejected, completed) so you can scan the list at a glance.",
+    "Fixed a bug where everything briefly looked unassigned right after the page loaded.",
+    "Added an optional \u201cOpen in new tab\u201d mode for listings.",
+    "Backend speed improvements \u2014 less waiting when assigning, completing, or refreshing.",
+  ]},
+  { version: 21, notes: ["Added a one-click self-update tool for pulling the latest version."] },
+  { version: 22, notes: ["The update tool now also refreshes your open CRM tabs automatically."] },
+  { version: 23, notes: ["You can now see which version you're running at the bottom of the popup."] },
+  { version: 24, notes: ["CRM tabs now wait a moment before refreshing, so nothing reloads before it's ready."] },
+  { version: 25, notes: ["History now opens instantly instead of sometimes taking up to a minute to load."] },
+  { version: 26, notes: ["You'll now see a heads-up countdown before your CRM tabs refresh."] },
+  { version: 27, notes: ["You're now asked before any CRM tab refreshes \u2014 so you won't lose unsaved work on a tab you meant to keep open."] },
+  { version: 28, notes: ["Rejected listings now automatically reopen for reassignment once new photos come back from a reshoot \u2014 no more manually noticing and fixing it."] },
+  { version: 29, notes: ["Reworked the update flow to be more reliable \u2014 the reload confirmation now actually works every time."] },
+  { version: 30, notes: ["CRM tabs now refresh immediately when you say yes, instead of waiting for the countdown first."] },
+  { version: 31, notes: ["The update screen now shows you what's new before you reload, instead of updating blind."] },
+];
+
 const card = document.getElementById("card");
 const isPostReload = new URLSearchParams(location.search).get("step") === "post";
 
@@ -28,7 +54,7 @@ function render(html) {
 function showConfirm({ title, body, onYes, onNo }) {
   render(`
     <h2>${title}</h2>
-    <p>${body}</p>
+    ${body}
     <div class="btn-row">
       <button class="btn-no" id="noBtn">No</button>
       <button class="btn-yes" id="yesBtn">Yes</button>
@@ -49,9 +75,34 @@ function showDone(text, closeAfterMs) {
 
 // ── Step 1: ask whether to reload the extension ──────────────────────────
 function stepReloadExtension() {
+  // The manifest still reflects the OLD version here — the new files are
+  // already synced to disk, but nothing's loaded them into memory yet,
+  // since that only happens once chrome.runtime.reload() actually runs
+  // below. That's exactly what makes this useful: it tells us precisely
+  // what's new to THIS person, whether they update daily or haven't in a
+  // while, rather than always just showing the latest single entry.
+  const currentVersion = parseInt(chrome.runtime.getManifest().version, 10) || 0;
+  const newEntries = CHANGELOG.filter(e => e.version > currentVersion);
+
+  let changelogHtml = "";
+  if (newEntries.length > 0) {
+    const items = newEntries.flatMap(e => e.notes).map(note => `<li>${note}</li>`).join("");
+    changelogHtml = `
+      <p style="text-align:left;font-weight:700;margin-bottom:6px;">What's new:</p>
+      <ul style="text-align:left;font-size:0.8rem;color:#c7cbd8;line-height:1.6;
+                 margin:0 0 16px 0;padding-left:18px;max-height:220px;overflow-y:auto;">
+        ${items}
+      </ul>
+    `;
+  }
+
   showConfirm({
     title: "DP Toolkit update ready",
-    body: "The latest files have been synced. Reload the extension now to apply them?",
+    body: `
+      <p>The latest files have been synced.</p>
+      ${changelogHtml}
+      <p>Reload the extension now to apply ${newEntries.length > 0 ? "these updates" : "them"}?</p>
+    `,
     onYes: () => {
       render(`<p>Reloading…</p>`);
       // dpPendingPostReloadTab is picked up by background.js once it
@@ -82,7 +133,7 @@ function stepPostReload() {
     const plural = tabs.length === 1 ? "tab" : "tabs";
     showConfirm({
       title: `Extension reloaded — v${version}`,
-      body: `Refresh ${tabs.length} open CRM ${plural} now?`,
+      body: `<p>Refresh ${tabs.length} open CRM ${plural} now?</p>`,
       onYes: () => {
         // Reload the tabs right away — the countdown below is just a
         // heads-up telling the person to wait before switching over to
