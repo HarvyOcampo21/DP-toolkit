@@ -42,59 +42,33 @@ function fetchWithTimeout(url, options) {
     });
 }
 
-// ── Delayed CRM tab refresh after an extension reload ───────────────────
-// reload.js sets dpPendingTabRefresh right before calling
+// ── Post-reload wizard tab ────────────────────────────────────────────────
+// reload.js sets dpPendingPostReloadTab right before calling
 // chrome.runtime.reload() — that call tears down reload.js's own execution
-// context almost immediately, so a setTimeout placed there would very
-// likely never fire. This top-level code, on the other hand, always runs
-// fresh every time the service worker starts — including right after a
-// reload — so it's the reliable place to pick the flag back up and do the
-// actual (intentionally delayed) tab refresh.
-const CRM_TAB_REFRESH_DELAY_SEC = 5;
-
-chrome.storage.local.get(["dpPendingTabRefresh"], result => {
-  const requestedAt = result && result.dpPendingTabRefresh;
+// context almost immediately, so nothing placed after it in that same
+// script can be relied on to run. This top-level code, on the other hand,
+// always runs fresh every time the service worker starts — including
+// right after a reload — so it's the reliable place to pick the flag back
+// up and continue the flow.
+//
+// Deliberately opens a brand-new reload.html tab here rather than trying
+// to message a content script in an already-open CRM tab: chrome.runtime.
+// reload() invalidates every content script that was already injected
+// before it ran, so a message sent to one of those tabs right after the
+// reload has no listener left alive to receive it. A freshly created
+// extension tab doesn't have that problem — its context is guaranteed
+// valid since it's created after the reload, not before it.
+chrome.storage.local.get(["dpPendingPostReloadTab"], result => {
+  const requestedAt = result && result.dpPendingPostReloadTab;
   if (!requestedAt) return;
   // Ignore a stale/leftover flag (e.g. from a crash before it got cleared)
-  // rather than firing an unexpected tab refresh long after the fact.
+  // rather than opening an unexpected tab long after the fact.
   if (Date.now() - requestedAt > 60000) {
-    chrome.storage.local.remove("dpPendingTabRefresh");
+    chrome.storage.local.remove("dpPendingPostReloadTab");
     return;
   }
-  chrome.storage.local.remove("dpPendingTabRefresh");
-
-  chrome.tabs.query({ url: "https://newcrm.drivenproperties.com/*" }, tabs => {
-    if (tabs.length === 0) return; // nothing open to refresh, nothing to ask
-
-    // Ask once, on whichever tab is currently active (falling back to the
-    // first match) — not once per open CRM tab. Someone might have several
-    // open (e.g. deliberately keeping one aside to avoid losing in-progress
-    // data on it), and a single yes/no decision should apply to all of
-    // them rather than prompting repeatedly for the same thing.
-    const targetTab = tabs.find(t => t.active) || tabs[0];
-    if (targetTab.id === undefined) return;
-
-    chrome.tabs.sendMessage(targetTab.id, { type: "DP_CONFIRM_REFRESH_TABS", tabCount: tabs.length }, response => {
-      // No listener on that tab (e.g. it navigated away in the interim) or
-      // no response at all — safest is to do nothing rather than force a
-      // refresh nobody actually agreed to.
-      if (chrome.runtime.lastError || !response || !response.confirmed) return;
-
-      // Confirmed — show the live countdown (matching the real delay
-      // below, not a separate fake timer) on every matching tab, then
-      // reload them all once it elapses.
-      tabs.forEach(tab => {
-        if (tab.id === undefined) return;
-        chrome.tabs.sendMessage(tab.id, { type: "DP_SHOW_REFRESH_COUNTDOWN", seconds: CRM_TAB_REFRESH_DELAY_SEC }, () => void chrome.runtime.lastError);
-      });
-
-      setTimeout(() => {
-        tabs.forEach(tab => {
-          if (tab.id !== undefined) chrome.tabs.reload(tab.id);
-        });
-      }, CRM_TAB_REFRESH_DELAY_SEC * 1000);
-    });
-  });
+  chrome.storage.local.remove("dpPendingPostReloadTab");
+  chrome.tabs.create({ url: chrome.runtime.getURL("reload.html?step=post") });
 });
 
 // Role is derived from the name the person picks in the popup (see
