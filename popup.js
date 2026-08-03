@@ -209,12 +209,22 @@ logLifestyleBtn.addEventListener("click", async () => {
 const COPIER_APPS_SCRIPT_URL = 'https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec';
 
 async function checkConnection() {
-  const dot  = document.getElementById('status-dot');
-  const text = document.getElementById('status-text');
-  if (!dot || !text) return;
+  const dot      = document.getElementById('status-dot');
+  const text     = document.getElementById('status-text');
+  const connDot  = document.getElementById('dpConnDot');
+  const connText = document.getElementById('dpConnText');
 
-  dot.className     = 'status-dot dot-warn';
-  text.textContent  = 'Checking…';
+  const setState = (dotClass, message) => {
+    if (dot)  dot.className  = 'status-dot ' + dotClass;
+    if (text) text.textContent = message;
+    if (connDot)  connDot.className  = dotClass;
+    if (connText) connText.textContent = message;
+  };
+
+  setState('dot-warn', 'Checking…');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
 
   try {
     const res = await fetch(COPIER_APPS_SCRIPT_URL, {
@@ -222,19 +232,46 @@ async function checkConnection() {
       headers:  { 'Content-Type': 'text/plain' },
       body:     JSON.stringify({ ping: true }),
       redirect: 'follow',
+      signal:   controller.signal,
     });
 
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const json = await res.json();
     if (!json.success && !json.ping) throw new Error('Bad response');
 
-    dot.className    = 'status-dot dot-ok';
-    text.textContent = '✅ Connected to Apps Script';
+    setState('dot-ok', '✅ Connected to Apps Script');
 
   } catch (err) {
-    dot.className    = 'status-dot dot-error';
-    text.textContent = '❌ Disconnected — ' + err.message;
+    const message = err && err.name === 'AbortError' ? 'Timed out after 10s' : (err.message || String(err));
+    setState('dot-error', '❌ Disconnected — ' + message);
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+// ── Force Sync ────────────────────────────────────────────────────────────
+// Re-checks the connection and re-fetches assignment data straight from the
+// background worker, bypassing whatever's currently cached client-side —
+// for exactly the kind of situation where something's written locally but
+// doesn't seem to be landing in the Sheet, and a person wants to force a
+// fresh look at what's actually true right now rather than wait for the
+// next scheduled poll.
+const dpForceSyncBtn = document.getElementById('dpForceSyncBtn');
+if (dpForceSyncBtn) {
+  dpForceSyncBtn.addEventListener('click', async () => {
+    dpForceSyncBtn.disabled = true;
+    dpForceSyncBtn.textContent = 'Syncing…';
+
+    await checkConnection();
+
+    chrome.storage.local.get(['myName'], ({ myName }) => {
+      if (myName) {
+        renderAssignmentsList(myName);
+      }
+      dpForceSyncBtn.disabled = false;
+      dpForceSyncBtn.textContent = '⟳ Force Sync';
+    });
+  });
 }
 
 // ── Version footer ────────────────────────────────────────────────────────

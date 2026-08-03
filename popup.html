@@ -135,11 +135,23 @@
 
   .col-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 11px; color: #6b7280; margin-top: 6px; }
 
-  /* ── Version footer ── */
+  /* ── Footer: connection status + force sync + version ── */
   #dpFooter {
     margin-top: 16px; padding-top: 12px; border-top: 1px solid #2b2f3d;
-    text-align: right;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
   }
+  #dpConnWrap { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #9aa0ad; }
+  #dpConnDot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  #dpConnDot.dot-ok    { background: #00d1b2; }
+  #dpConnDot.dot-warn  { background: #e6941a; }
+  #dpConnDot.dot-error { background: #ef4444; }
+  #dpForceSyncBtn {
+    background: #262a38; border: 1px solid #353b4d; color: #9aa0ad;
+    border-radius: 6px; padding: 4px 9px; font-size: 0.7rem; font-weight: 700;
+    cursor: pointer; white-space: nowrap;
+  }
+  #dpForceSyncBtn:hover:not(:disabled) { border-color: #00d1b2; color: #00d1b2; }
+  #dpForceSyncBtn:disabled { opacity: 0.6; cursor: default; }
   #dpVersionText { font-size: 0.72rem; color: #6b7280; font-family: monospace; }
 </style>
 </head>
@@ -241,7 +253,14 @@
       </div>
     </div>
 
-    <div id="dpFooter"><span id="dpVersionText"></span></div>
+    <div id="dpFooter">
+      <div id="dpConnWrap">
+        <div id="dpConnDot" class="dot-warn"></div>
+        <span id="dpConnText">Checking…</span>
+      </div>
+      <button id="dpForceSyncBtn" title="Re-check connection and re-fetch the latest data from the Sheet, bypassing any local cache">⟳ Force Sync</button>
+      <span id="dpVersionText"></span>
+    </div>
 
   </div>
 

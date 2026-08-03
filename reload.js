@@ -42,6 +42,7 @@ const CHANGELOG = [
   { version: 29, notes: ["Reworked the update flow to be more reliable \u2014 the reload confirmation now actually works every time."] },
   { version: 30, notes: ["CRM tabs now refresh immediately when you say yes, instead of waiting for the countdown first."] },
   { version: 31, notes: ["The update screen now shows you what's new before you reload, instead of updating blind."] },
+  { version: 32, notes: ["The popup now shows a live connection status to Apps Script at all times, plus a \u201cForce Sync\u201d button to re-check the connection and re-fetch the latest data on demand."] },
 ];
 
 const card = document.getElementById("card");
