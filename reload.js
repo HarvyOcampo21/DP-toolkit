@@ -84,17 +84,25 @@ function stepPostReload() {
       title: `Extension reloaded — v${version}`,
       body: `Refresh ${tabs.length} open CRM ${plural} now?`,
       onYes: () => {
+        // Reload the tabs right away — the countdown below is just a
+        // heads-up telling the person to wait before switching over to
+        // them, not something the actual refresh is gated behind. If the
+        // reload waited until the countdown finished, "0" wouldn't
+        // actually mean the tabs are ready — it'd mean they just started
+        // loading. Firing immediately gives the page load that time to
+        // actually finish in the background while the countdown runs.
+        tabs.forEach(t => { if (t.id !== undefined) chrome.tabs.reload(t.id); });
+
         let remaining = 5;
         const tick = () => {
-          render(`<div class="countdown">${remaining}</div><p>Refreshing ${tabs.length} CRM ${plural}...</p>`);
+          render(`<div class="countdown">${remaining}</div><p>Refreshing ${tabs.length} CRM ${plural}\u2014give it a moment before switching over.</p>`);
         };
         tick();
         const iv = setInterval(() => {
           remaining -= 1;
           if (remaining <= 0) {
             clearInterval(iv);
-            tabs.forEach(t => { if (t.id !== undefined) chrome.tabs.reload(t.id); });
-            showDone("All CRM tabs refreshed. You can close this tab.", 2000);
+            showDone("Should be ready now. You can close this tab.", 2000);
             return;
           }
           tick();
