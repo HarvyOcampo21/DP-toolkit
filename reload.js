@@ -43,6 +43,7 @@ const CHANGELOG = [
   { version: 30, notes: ["CRM tabs now refresh immediately when you say yes, instead of waiting for the countdown first."] },
   { version: 31, notes: ["The update screen now shows you what's new before you reload, instead of updating blind."] },
   { version: 32, notes: ["The popup now shows a live connection status to Apps Script at all times, plus a \u201cForce Sync\u201d button to re-check the connection and re-fetch the latest data on demand."] },
+  { version: 33, notes: ["Fixed a bug where assigning, starting, holding, rejecting, or completing a listing could show a false \u201creverted\u201d error and undo itself, even though it had actually saved correctly \u2014 it now double-checks before giving up."] },
 ];
 
 const card = document.getElementById("card");

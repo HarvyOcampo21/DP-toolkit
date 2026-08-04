@@ -104,6 +104,53 @@
     catch (e) { handleContextInvalidated(); }
   }
 
+  // Shared by every write action below. Confirmed real behavior (not a
+  // guess): Apps Script's write itself can succeed correctly while the
+  // HTTP response delivery back to the browser still flakes (e.g.
+  // returning an HTML page instead of the expected JSON) — so a "failed"
+  // response here does NOT reliably mean the write didn't happen. Reverting
+  // and alerting immediately, as every write action used to do, produces
+  // exactly the reported symptom: revert + alert, even though the Sheet
+  // already has the correct value, self-correcting a few seconds later
+  // once the next poll catches up. Doing one quick re-check of the real
+  // current state before deciding avoids that false alarm entirely — only
+  // reverts/alerts if the recheck genuinely shows the old value too.
+  function verifyBeforeReverting(ref, expectedStatusOrPredicate, doRevert, failureMessage) {
+    const matches = typeof expectedStatusOrPredicate === "function"
+      ? expectedStatusOrPredicate
+      : m => m.status === expectedStatusOrPredicate;
+
+    safeSendMessage({ type: "DP_GET_ALL" }, verifyResp => {
+      const match = verifyResp && verifyResp.ok && verifyResp.data && Array.isArray(verifyResp.data.assignments)
+        ? verifyResp.data.assignments.find(a => a.ref === ref)
+        : null;
+
+      if (match && matches(match)) {
+        // It actually went through — the earlier "failure" was in the
+        // response delivery, not the write. Sync to the now-confirmed
+        // truth and leave the UI as-is; no revert, no alert.
+        assignmentCache[ref] = {
+          editor: match.editor || "", status: match.status || "", title: match.title || "",
+          assignedAt: match.assignedAt || "", startedAt: match.startedAt || "",
+          completedAt: match.completedAt || "", rejectedAt: match.rejectedAt || "",
+          onHoldAt: match.onHoldAt || "", onHoldReason: match.onHoldReason || "",
+          assignedBy: match.assignedBy || "", reassignedFrom: match.reassignedFrom || "",
+          reassignedTo: match.reassignedTo || "", reassignedBy: match.reassignedBy || "",
+          reassignedAt: match.reassignedAt || "", bedrooms: match.bedrooms || "",
+          crmStatus: match.crmStatus || "", downloadedAt: match.downloadedAt || "",
+        };
+        if (match.downloaded) downloadedCache[ref] = true; else delete downloadedCache[ref];
+        lastLocalChangeAt[ref] = Date.now();
+        processRows();
+        return;
+      }
+
+      // Genuinely didn't happen — now actually revert and say so.
+      doRevert();
+      alert(failureMessage);
+    });
+  }
+
   // Bottom-right confirmation toast — same fixed position/fade timing as
   // identity-guard.js's name-warning toast, but in the extension's teal
   // "success" palette rather than red, used to confirm clipboard copies.
@@ -449,11 +496,12 @@
         const downloadedAt = val ? new Date().toISOString() : "";
         safeSendMessage({ type: "DP_SET_DOWNLOADED", ref, downloaded: val, downloadedAt, title }, resp => {
           if (!(resp && resp.ok)) {
-            if (wasSet) downloadedCache[ref] = true; else delete downloadedCache[ref];
-            lastLocalChangeAt[ref] = Date.now();
-            cell.dataset.dpDownloaded = wasSet ? "1" : "0";
-            downloadedCheckbox.checked = wasSet;
-            alert("Could not save downloaded status — reverted.");
+            verifyBeforeReverting(ref, m => !!m.downloaded === val, () => {
+              if (wasSet) downloadedCache[ref] = true; else delete downloadedCache[ref];
+              lastLocalChangeAt[ref] = Date.now();
+              cell.dataset.dpDownloaded = wasSet ? "1" : "0";
+              downloadedCheckbox.checked = wasSet;
+            }, "Could not save downloaded status — reverted.");
           }
         });
       });
@@ -754,21 +802,22 @@
           actionBy: MY_NAME, crmStatus: categoryOverride }, resp => {
           if (!(resp && resp.ok)) {
             console.log("DP assign failed", resp);
-            if (previousEntry) {
-              assignmentCache[ref] = previousEntry;
-              cell.dataset.dpAppliedEditor = previousEntry.editor || "";
-              cell.dataset.dpAppliedStatus = previousEntry.status || "";
-              if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
-              else renderUnassigned();
-            } else {
-              delete assignmentCache[ref];
-              cell.dataset.dpAppliedEditor = "";
-              cell.dataset.dpAppliedStatus = "";
-              renderUnassigned();
-            }
-            lastLocalChangeAt[ref] = Date.now();
-            applyFilters();
-            alert("Could not save the assignment — reverted.\nCheck WEB_APP_URL/TOKEN in background.js.");
+            verifyBeforeReverting(ref, "Assigned", () => {
+              if (previousEntry) {
+                assignmentCache[ref] = previousEntry;
+                cell.dataset.dpAppliedEditor = previousEntry.editor || "";
+                cell.dataset.dpAppliedStatus = previousEntry.status || "";
+                if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
+                else renderUnassigned();
+              } else {
+                delete assignmentCache[ref];
+                cell.dataset.dpAppliedEditor = "";
+                cell.dataset.dpAppliedStatus = "";
+                renderUnassigned();
+              }
+              lastLocalChangeAt[ref] = Date.now();
+              applyFilters();
+            }, "Could not save the assignment — reverted.\nCheck WEB_APP_URL/TOKEN in background.js.");
           }
         });
       });
@@ -796,16 +845,17 @@
         safeSendMessage({ type: "DP_UNASSIGN", ref }, resp => {
           if (!(resp && resp.ok)) {
             console.log("DP unassign failed", resp);
-            if (previousEntry) {
-              assignmentCache[ref] = previousEntry;
-              cell.dataset.dpAppliedEditor = previousEntry.editor || "";
-              cell.dataset.dpAppliedStatus = previousEntry.status || "";
-              if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
-              else renderUnassigned();
-              applyFilters();
-            }
-            lastLocalChangeAt[ref] = Date.now();
-            alert("Could not clear the assignment — reverted.\nCheck WEB_APP_URL/TOKEN in background.js.");
+            verifyBeforeReverting(ref, "Unassigned", () => {
+              if (previousEntry) {
+                assignmentCache[ref] = previousEntry;
+                cell.dataset.dpAppliedEditor = previousEntry.editor || "";
+                cell.dataset.dpAppliedStatus = previousEntry.status || "";
+                if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
+                else renderUnassigned();
+                applyFilters();
+              }
+              lastLocalChangeAt[ref] = Date.now();
+            }, "Could not clear the assignment — reverted.\nCheck WEB_APP_URL/TOKEN in background.js.");
           }
         });
       });
@@ -835,17 +885,18 @@
         safeSendMessage({ type: "DP_MARK_INPROGRESS", ref, title }, resp => {
           if (!(resp && resp.ok)) {
             console.log("DP markInProgress failed", resp);
-            if (previousEntry) assignmentCache[ref] = previousEntry;
-            else delete assignmentCache[ref];
-            lastLocalChangeAt[ref] = Date.now();
-            cell.dataset.dpAppliedStatus = previousEntry ? previousEntry.status : "";
-            if (previousEntry && isActiveStatus(previousEntry.status)) {
-              renderAssigned(previousEntry.editor, previousEntry.status);
-            } else {
-              renderUnassigned();
-            }
-            applyFilters();
-            alert("Could not mark In Progress — reverted.");
+            verifyBeforeReverting(ref, "In Progress", () => {
+              if (previousEntry) assignmentCache[ref] = previousEntry;
+              else delete assignmentCache[ref];
+              lastLocalChangeAt[ref] = Date.now();
+              cell.dataset.dpAppliedStatus = previousEntry ? previousEntry.status : "";
+              if (previousEntry && isActiveStatus(previousEntry.status)) {
+                renderAssigned(previousEntry.editor, previousEntry.status);
+              } else {
+                renderUnassigned();
+              }
+              applyFilters();
+            }, "Could not mark In Progress — reverted.");
           }
         });
       });
@@ -869,14 +920,15 @@
         safeSendMessage({ type: "DP_SET_ON_HOLD", ref, reason, title }, resp => {
           if (!(resp && resp.ok)) {
             console.log("DP setOnHold failed", resp);
-            if (previousEntry) assignmentCache[ref] = previousEntry;
-            else delete assignmentCache[ref];
-            lastLocalChangeAt[ref] = Date.now();
-            cell.dataset.dpAppliedStatus = previousEntry ? previousEntry.status : "";
-            if (previousEntry && isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
-            else renderUnassigned();
-            applyFilters();
-            alert("Could not set on hold — reverted.");
+            verifyBeforeReverting(ref, "On Hold", () => {
+              if (previousEntry) assignmentCache[ref] = previousEntry;
+              else delete assignmentCache[ref];
+              lastLocalChangeAt[ref] = Date.now();
+              cell.dataset.dpAppliedStatus = previousEntry ? previousEntry.status : "";
+              if (previousEntry && isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
+              else renderUnassigned();
+              applyFilters();
+            }, "Could not set on hold — reverted.");
           }
         });
       });
@@ -2586,12 +2638,19 @@
         btn.textContent = "Completed \u2713";
       } else {
         console.log("DP drawer markCompleted failed", resp);
-        if (previousEntry) assignmentCache[ref] = previousEntry;
-        else delete assignmentCache[ref];
-        lastLocalChangeAt[ref] = Date.now();
-        btn.disabled = false;
-        btn.textContent = "Complete";
-        alert("Could not mark Completed — try again.");
+        verifyBeforeReverting(ref, "Completed", () => {
+          if (previousEntry) assignmentCache[ref] = previousEntry;
+          else delete assignmentCache[ref];
+          lastLocalChangeAt[ref] = Date.now();
+          document.querySelectorAll(".dp-assign-cell").forEach(c => {
+            if (c.dataset.dpRef === ref) {
+              c.dataset.dpAppliedStatus = previousEntry ? previousEntry.status || "" : "";
+              c.__dpRenderStatus && c.__dpRenderStatus();
+            }
+          });
+          btn.disabled = false;
+          btn.textContent = "Complete";
+        }, "Could not mark Completed — try again.");
       }
     });
   }
@@ -2750,9 +2809,17 @@
     safeSendMessage({ type: "DP_MARK_COMPLETED", ref, editor, title }, resp => {
       if (!(resp && resp.ok)) {
         console.log("DP mark-completed failed", resp);
-        if (previousEntry) assignmentCache[ref] = previousEntry;
-        else delete assignmentCache[ref];
-        lastLocalChangeAt[ref] = Date.now();
+        verifyBeforeReverting(ref, "Completed", () => {
+          if (previousEntry) assignmentCache[ref] = previousEntry;
+          else delete assignmentCache[ref];
+          lastLocalChangeAt[ref] = Date.now();
+          document.querySelectorAll(".dp-assign-cell").forEach(c => {
+            if (c.dataset.dpRef === ref) {
+              c.dataset.dpAppliedStatus = previousEntry ? previousEntry.status || "" : "";
+              c.__dpRenderStatus && c.__dpRenderStatus();
+            }
+          });
+        }, "Could not mark Completed — reverted.");
       }
     });
   }), true);
@@ -2797,9 +2864,17 @@
     safeSendMessage({ type: "DP_MARK_REJECTED", ref, editor, title }, resp => {
       if (!(resp && resp.ok)) {
         console.log("DP mark-rejected failed", resp);
-        if (previousEntry) assignmentCache[ref] = previousEntry;
-        else delete assignmentCache[ref];
-        lastLocalChangeAt[ref] = Date.now();
+        verifyBeforeReverting(ref, "Rejected", () => {
+          if (previousEntry) assignmentCache[ref] = previousEntry;
+          else delete assignmentCache[ref];
+          lastLocalChangeAt[ref] = Date.now();
+          document.querySelectorAll(".dp-assign-cell").forEach(c => {
+            if (c.dataset.dpRef === ref) {
+              c.dataset.dpAppliedStatus = previousEntry ? previousEntry.status || "" : "";
+              c.__dpRenderStatus && c.__dpRenderStatus();
+            }
+          });
+        }, "Could not mark Rejected — reverted.");
       }
     });
   }), true);
