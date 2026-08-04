@@ -21,13 +21,15 @@ const ASSIGNER_CONFIG = {
 const COPIER_APPS_SCRIPT_URL = "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
 
 // Shared by every request to Apps Script (both Assigner and Copier — same
-// deployment). Without this, a request stuck behind Apps Script's write
-// lock (which can legitimately wait up to 30s server-side) just hangs
-// silently on the client with zero feedback — indistinguishable from the
-// extension being broken. This turns that into a fast, clear failure
-// instead, so the UI can show something actionable (see the data-status
-// banner in assigner-content.js) rather than freezing.
-const FETCH_TIMEOUT_MS = 15000;
+// deployment). The Assigner's write lock (see appscript.js assignerDoPost)
+// legitimately waits up to 30s for any other write to finish before it even
+// starts — that's correct, intentional behavior, not a hang. This timeout
+// must stay comfortably above that 30s so a normal lock wait never gets
+// mistaken for a failure: aborting the fetch client-side does NOT cancel the
+// request server-side, so a client that gives up too early doesn't stop the
+// write — it just stops finding out about it, which is what was producing
+// false "reverted" alerts moments before the real success toast appeared.
+const FETCH_TIMEOUT_MS = 40000;
 
 function fetchWithTimeout(url, options) {
   const controller = new AbortController();

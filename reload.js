@@ -48,6 +48,9 @@ const CHANGELOG = [
     "The Assignment board now updates far faster \u2014 refreshing roughly every 3 seconds while you're actively viewing it, instead of every 15.",
     "Background tabs you're not currently looking at check in less often, so the faster refresh doesn't slow things down overall \u2014 switching back to a tab refreshes it immediately.",
   ]},
+  { version: 35, notes: [
+    "Fixed a bigger version of the v33 bug: assigning, starting, holding, rejecting, or completing a listing could still show a false \u201creverted\u201d error under normal load, even though the save was still quietly finishing on the server \u2014 it now gives a slow-but-real save several extra seconds to land before ever showing an error.",
+  ]},
 ];
 
 const card = document.getElementById("card");

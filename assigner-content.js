@@ -119,10 +119,21 @@
   // and alerting immediately, as every write action used to do, produces
   // exactly the reported symptom: revert + alert, even though the Sheet
   // already has the correct value, self-correcting a few seconds later
-  // once the next poll catches up. Doing one quick re-check of the real
-  // current state before deciding avoids that false alarm entirely — only
-  // reverts/alerts if the recheck genuinely shows the old value too.
-  function verifyBeforeReverting(ref, expectedStatusOrPredicate, doRevert, failureMessage) {
+  // once the next poll catches up.
+  //
+  // A SINGLE immediate recheck isn't enough on its own: the server's write
+  // lock can legitimately still be holding the actual write seconds after
+  // the client already gave up (aborting client-side does not cancel the
+  // request server-side — it keeps running to completion regardless). A
+  // recheck fired the instant the timeout fires can catch that write mid-
+  // flight, correctly see the OLD value in that exact moment, and revert
+  // anyway — which is a false negative on timing, not a real failure. So
+  // this retries a few times with a short gap before giving up, giving a
+  // slow-but-real write room to land instead of declaring failure on the
+  // first snapshot that happens to be too early.
+  const VERIFY_MAX_ATTEMPTS = 4;   // 1 immediate + 3 retries
+  const VERIFY_RETRY_DELAY_MS = 3000; // ~9s of extra patience beyond the immediate check
+  function verifyBeforeReverting(ref, expectedStatusOrPredicate, doRevert, failureMessage, attempt = 0) {
     const matches = typeof expectedStatusOrPredicate === "function"
       ? expectedStatusOrPredicate
       : m => m.status === expectedStatusOrPredicate;
@@ -134,8 +145,9 @@
 
       if (match && matches(match)) {
         // It actually went through — the earlier "failure" was in the
-        // response delivery, not the write. Sync to the now-confirmed
-        // truth and leave the UI as-is; no revert, no alert.
+        // response delivery (or a slow-but-real write), not the write
+        // itself. Sync to the now-confirmed truth and leave the UI as-is;
+        // no revert, no alert.
         assignmentCache[ref] = {
           editor: match.editor || "", status: match.status || "", title: match.title || "",
           assignedAt: match.assignedAt || "", startedAt: match.startedAt || "",
@@ -152,7 +164,16 @@
         return;
       }
 
-      // Genuinely didn't happen — now actually revert and say so.
+      if (attempt < VERIFY_MAX_ATTEMPTS - 1) {
+        // Still not confirmed — the write may just not have landed yet.
+        // Wait a beat and check again rather than giving up on this snapshot.
+        setTimeout(guarded(() =>
+          verifyBeforeReverting(ref, expectedStatusOrPredicate, doRevert, failureMessage, attempt + 1)
+        ), VERIFY_RETRY_DELAY_MS);
+        return;
+      }
+
+      // Genuinely didn't happen after every retry — now actually revert and say so.
       doRevert();
       alert(failureMessage);
     });
