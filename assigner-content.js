@@ -1471,9 +1471,18 @@
         // in-that-instant "old" data and clobbering the correct local
         // state — which then self-corrects on the next poll once the
         // write has landed. That's exactly the "reverts, then fixes
-        // itself a bit later" symptom. 12s comfortably covers a normal
-        // write plus reasonable lock-wait time under load.
-        const LOCAL_CHANGE_COOLDOWN_MS = 12000;
+        // itself a bit later" symptom.
+        //
+        // This MUST stay comfortably above background.js's FETCH_TIMEOUT_MS
+        // (40s) — that's the longest a legitimate, still-succeeding write is
+        // now allowed to take before we'd even call it a failure, so this
+        // window has to outlast it too. Letting this expire first is exactly
+        // what caused the "Completed -> flickers back to In Progress ->
+        // self-corrects" bug: the cooldown gave up trusting local state
+        // seconds before the (still perfectly healthy) write had actually
+        // landed, so a poll in that gap read genuinely-stale sheet data and
+        // clobbered the correct optimistic UI for no reason.
+        const LOCAL_CHANGE_COOLDOWN_MS = 45000;
         allRefs.forEach(ref => {
           const localAt = lastLocalChangeAt[ref] || 0;
           if (Date.now() - localAt < LOCAL_CHANGE_COOLDOWN_MS) {
