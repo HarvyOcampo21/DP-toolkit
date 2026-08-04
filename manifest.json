@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DP Toolkit",
-  "version": "33",
+  "version": "34",
   "description": "Assign & track photo requests, copy/log listing info to Google Sheets, and preview/download listing photos — all in one extension. Access level (senior/junior) is detected automatically from the name you select.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl4iwsTGV2RlfWmELh24yhoqauBl1/oGqpZTcs+PkRfcvxwKweTpBtbvvm8cYKu+peCew73evucDs6VcEGknZWPxZf1SPF5yTcV3J0pxSdCSj5he+PAtcvLDKixXWsTGf9+1D9agq2jE8UFp6CJuXjZwpJiF2XbZNzmI1KRoT8t/A3t8/pFXOyK5tSeSmVis1DqCZIt1Zh0/JC/1F18IZ/S1pGG98YNgEH1PUI2iYRUmtCTzjNEnBqiK3GpxCOD6eCHjFqYrNrNXNmQnAN66kfN1wBoY50COvNhF3YXiXTuTSzc9FDitK0FE22q5biWS0MSGhYoNrQBOJ1ClzVK+adQIDAQAB",
   "permissions": ["storage", "clipboardWrite", "downloads", "offscreen", "tabs", "notifications", "alarms"],

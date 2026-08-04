@@ -48,7 +48,14 @@
            status === "Completed"   ? "completed"  : "";
   }
   const PROCESS_DEBOUNCE_MS = 150;
-  const REFRESH_INTERVAL_MS = 15000;
+  // Real-time mode: as fast as we can safely poll Apps Script (which is now
+  // fully uncached on this endpoint — see appscript.js) without tripping its
+  // execution/URL-fetch quotas across every editor + dashboard tab polling
+  // at once. 3s is the active-tab rate; BACKGROUND_REFRESH_INTERVAL_MS below
+  // backs off automatically for tabs that aren't currently visible, which is
+  // what buys the headroom to poll this tight in the first place.
+  const REFRESH_INTERVAL_MS = 3000;
+  const BACKGROUND_REFRESH_INTERVAL_MS = 15000;
   const BURST_WINDOW_MS = 2000;
   const BURST_THRESHOLD = 25;
   const BURST_DEBOUNCE_MS = 800;
@@ -2986,10 +2993,14 @@
     // Stale data (a snapshot older than one refresh interval) is dropped
     // rather than trusted — better to show a brief loading state than
     // confidently wrong data from an old session.
+    // Staleness window is pegged to BACKGROUND_REFRESH_INTERVAL_MS (not the
+    // tight 3s active-tab rate) since a tab that was backgrounded right
+    // before a reload should still trust its last snapshot rather than
+    // discard it over a gap that's normal, not stale.
     if (result && result.dpAssignSnapshot) {
       try {
         const snap = JSON.parse(result.dpAssignSnapshot);
-        if (snap && snap.savedAt && Date.now() - snap.savedAt < REFRESH_INTERVAL_MS * 3) {
+        if (snap && snap.savedAt && Date.now() - snap.savedAt < BACKGROUND_REFRESH_INTERVAL_MS) {
           assignmentCache = snap.assignmentCache || {};
           downloadedCache = snap.downloadedCache || {};
         }
@@ -2997,7 +3008,24 @@
     }
 
     refreshAssignments();
-    pollHandle = setInterval(guarded(refreshAssignments), REFRESH_INTERVAL_MS);
+    startPolling();
+    document.addEventListener("visibilitychange", guarded(startPolling));
     debounceProcess();
   });
+
+  // Restarts the poll loop at the rate matching current tab visibility.
+  // Called on init and again every time visibility changes, so a
+  // backgrounded tab drops to a slow keep-alive rate (freeing up quota for
+  // whichever tabs are actually being watched) and snaps back to the fast
+  // real-time rate the instant it's focused again — with an immediate
+  // refresh on that transition so there's no stale wait after switching back.
+  function startPolling() {
+    if (contextDead) return;
+    if (pollHandle) clearInterval(pollHandle);
+    const interval = document.visibilityState === "visible"
+      ? REFRESH_INTERVAL_MS
+      : BACKGROUND_REFRESH_INTERVAL_MS;
+    if (document.visibilityState === "visible") refreshAssignments();
+    pollHandle = setInterval(guarded(refreshAssignments), interval);
+  }
 })();

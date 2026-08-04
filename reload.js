@@ -44,6 +44,10 @@ const CHANGELOG = [
   { version: 31, notes: ["The update screen now shows you what's new before you reload, instead of updating blind."] },
   { version: 32, notes: ["The popup now shows a live connection status to Apps Script at all times, plus a \u201cForce Sync\u201d button to re-check the connection and re-fetch the latest data on demand."] },
   { version: 33, notes: ["Fixed a bug where assigning, starting, holding, rejecting, or completing a listing could show a false \u201creverted\u201d error and undo itself, even though it had actually saved correctly \u2014 it now double-checks before giving up."] },
+  { version: 34, notes: [
+    "The Assignment board now updates far faster \u2014 refreshing roughly every 3 seconds while you're actively viewing it, instead of every 15.",
+    "Background tabs you're not currently looking at check in less often, so the faster refresh doesn't slow things down overall \u2014 switching back to a tab refreshes it immediately.",
+  ]},
 ];
 
 const card = document.getElementById("card");
