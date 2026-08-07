@@ -15,10 +15,28 @@ const ASSIGNER_CONFIG = {
   // Assigner-only deployment can be retired once this is confirmed working.
   WEB_APP_URL: "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec",
   TOKEN: "DPPE",
-  WORK_GOOGLE_EMAIL: "harvy@drivenproperties.com",
 };
 
 const COPIER_APPS_SCRIPT_URL = "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
+
+// Detects the actual Google account Chrome itself is signed into (the
+// account someone uses to sync Chrome, not a guess derived from a name
+// picked in the popup) — universal by construction: works identically
+// for anyone whose Chrome profile is signed in with their
+// @drivenproperties.com account, with no roster/override list to keep in
+// sync, and no dependency on having picked a name at all. Only ever
+// returns an email if it's genuinely on the company domain; otherwise
+// resolves to "" so the caller falls back to opening Drive normally
+// rather than forcing the wrong account.
+function getSignedInWorkEmail() {
+  return new Promise(resolve => {
+    if (!chrome.identity || !chrome.identity.getProfileUserInfo) { resolve(""); return; }
+    chrome.identity.getProfileUserInfo({ accountStatus: "ANY" }, info => {
+      const email = (info && info.email || "").toLowerCase();
+      resolve(email.endsWith("@drivenproperties.com") ? email : "");
+    });
+  });
+}
 
 // Shared by every request to Apps Script (both Assigner and Copier — same
 // deployment). The Assigner's write lock (see appscript.js assignerDoPost)
@@ -247,10 +265,10 @@ function buildAssignerGetUrl() {
   return url.toString();
 }
 
-function buildDriveSearchUrl(query) {
+function buildDriveSearchUrl(query, workEmail) {
   const url = new URL("https://drive.google.com/drive/search");
   url.searchParams.set("q", query);
-  if (ASSIGNER_CONFIG.WORK_GOOGLE_EMAIL) url.searchParams.set("authuser", ASSIGNER_CONFIG.WORK_GOOGLE_EMAIL);
+  if (workEmail) url.searchParams.set("authuser", workEmail);
   return url.toString();
 }
 
@@ -375,10 +393,19 @@ function dispatchAssignerMessage(message, sendResponse) {
   }
 
   if (message.type === "DP_OPEN_DRIVE_SEARCH") {
-    const targetUrl = buildDriveSearchUrl(message.query || "");
-    // active:false — opens the Drive search in a background tab so the
-    // person's focus stays on the CRM tab instead of jumping away from it.
-    chrome.tabs.create({ url: targetUrl, active: false }, () => sendResponse({ ok: true }));
+    // authuser forces Drive to open under a specific Google account (by
+    // email) if that account is already signed into this Chrome profile —
+    // otherwise the search silently falls back to whichever Google account
+    // happens to be active, which is often wrong on a shared/multi-account
+    // machine. Universal: detected directly from Chrome's own sign-in
+    // rather than guessed from a name, so this works identically for
+    // everyone and even before a name's been picked at all.
+    getSignedInWorkEmail().then(workEmail => {
+      const targetUrl = buildDriveSearchUrl(message.query || "", workEmail);
+      // active:false — opens the Drive search in a background tab so the
+      // person's focus stays on the CRM tab instead of jumping away from it.
+      chrome.tabs.create({ url: targetUrl, active: false }, () => sendResponse({ ok: true }));
+    });
     return true;
   }
 

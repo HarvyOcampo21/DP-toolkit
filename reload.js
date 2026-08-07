@@ -52,7 +52,10 @@ const CHANGELOG = [
     "Fixed a bigger version of the v33 bug: assigning, starting, holding, rejecting, or completing a listing could still show a false \u201creverted\u201d error under normal load, even though the save was still quietly finishing on the server \u2014 it now gives a slow-but-real save several extra seconds to land before ever showing an error.",
   ]},
   { version: 36, notes: [
-    "Fixed a follow-on to the v35 fix: a listing could briefly flicker back to its old status a few seconds after you completed/assigned/held/rejected it, then correct itself back \u2014 caused by the same \u201cgive it more time\u201d fix not yet covering that gap. It's now covered for the same amount of time, so this shouldn't happen anymore.",
+    "The Google Drive search button now opens under YOUR OWN company account, based on the name you picked in the popup \u2014 previously it always forced everyone's search into one specific editor's account.",
+  ]},
+  { version: 37, notes: [
+    "The Drive search account fix from v36 is now fully automatic \u2014 it detects whichever @drivenproperties.com account Chrome itself is signed into, no name needs to be picked first, and there's no list of names/emails to keep updated as the team changes.",
   ]},
 ];
 
