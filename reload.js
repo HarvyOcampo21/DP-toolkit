@@ -57,6 +57,15 @@ const CHANGELOG = [
   { version: 37, notes: [
     "The Drive search account fix from v36 is now fully automatic \u2014 it detects whichever @drivenproperties.com account Chrome itself is signed into, no name needs to be picked first, and there's no list of names/emails to keep updated as the team changes.",
   ]},
+  { version: 38, notes: [
+    "Reverted the v37 auto-detect approach for Drive search \u2014 it wasn't reliably picking up the signed-in account. Back to deriving the account from the name picked in the popup (v36's approach).",
+  ]},
+  { version: 39, notes: [
+    "Fixed Time History never showing when a listing was downloaded \u2014 the timestamp was being tracked but was getting dropped on every refresh before it could display.",
+  ]},
+  { version: 40, notes: [
+    "Fixed Time History also missing \u201cAssigned by\u201d and reassignment details \u2014 same root cause as the v39 download-time fix, now closed for every field the timeline shows.",
+  ]},
 ];
 
 const card = document.getElementById("card");

@@ -19,23 +19,18 @@ const ASSIGNER_CONFIG = {
 
 const COPIER_APPS_SCRIPT_URL = "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
 
-// Detects the actual Google account Chrome itself is signed into (the
-// account someone uses to sync Chrome, not a guess derived from a name
-// picked in the popup) — universal by construction: works identically
-// for anyone whose Chrome profile is signed in with their
-// @drivenproperties.com account, with no roster/override list to keep in
-// sync, and no dependency on having picked a name at all. Only ever
-// returns an email if it's genuinely on the company domain; otherwise
-// resolves to "" so the caller falls back to opening Drive normally
-// rather than forcing the wrong account.
-function getSignedInWorkEmail() {
-  return new Promise(resolve => {
-    if (!chrome.identity || !chrome.identity.getProfileUserInfo) { resolve(""); return; }
-    chrome.identity.getProfileUserInfo({ accountStatus: "ANY" }, info => {
-      const email = (info && info.email || "").toLowerCase();
-      resolve(email.endsWith("@drivenproperties.com") ? email : "");
-    });
-  });
+// Explicit exceptions for anyone whose real @drivenproperties.com address
+// doesn't follow the plain {firstname}@drivenproperties.com pattern (e.g.
+// two editors sharing a first name, or a different naming convention).
+// Add entries here as {"ExactNameFromPopup": "actual.email@drivenproperties.com"}
+// — everyone not listed falls back to the pattern automatically.
+const WORK_EMAIL_OVERRIDES = {
+  // "Jabir": "jabir.k@drivenproperties.com",
+};
+
+function buildWorkEmail(name) {
+  if (WORK_EMAIL_OVERRIDES[name]) return WORK_EMAIL_OVERRIDES[name];
+  return name.trim().toLowerCase().replace(/\s+/g, "") + "@drivenproperties.com";
 }
 
 // Shared by every request to Apps Script (both Assigner and Copier — same
@@ -395,12 +390,16 @@ function dispatchAssignerMessage(message, sendResponse) {
   if (message.type === "DP_OPEN_DRIVE_SEARCH") {
     // authuser forces Drive to open under a specific Google account (by
     // email) if that account is already signed into this Chrome profile —
-    // otherwise the search silently falls back to whichever Google account
-    // happens to be active, which is often wrong on a shared/multi-account
-    // machine. Universal: detected directly from Chrome's own sign-in
-    // rather than guessed from a name, so this works identically for
-    // everyone and even before a name's been picked at all.
-    getSignedInWorkEmail().then(workEmail => {
+    // otherwise every editor's search silently falls back to whichever
+    // Google account happens to be active, which is often wrong on a
+    // shared/multi-account machine. Derived from whichever name they
+    // picked in the popup — same source already used for their role —
+    // rather than one hardcoded email that only ever worked for one person.
+    // Assumes the {firstname}@drivenproperties.com convention; see
+    // WORK_EMAIL_OVERRIDES above for anyone whose real address doesn't
+    // follow it.
+    chrome.storage.local.get(["myName"], ({ myName }) => {
+      const workEmail = myName ? buildWorkEmail(myName) : "";
       const targetUrl = buildDriveSearchUrl(message.query || "", workEmail);
       // active:false — opens the Drive search in a background tab so the
       // person's focus stays on the CRM tab instead of jumping away from it.
