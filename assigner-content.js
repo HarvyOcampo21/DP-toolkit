@@ -157,6 +157,7 @@
           reassignedTo: match.reassignedTo || "", reassignedBy: match.reassignedBy || "",
           reassignedAt: match.reassignedAt || "", bedrooms: match.bedrooms || "",
           crmStatus: match.crmStatus || "", downloadedAt: match.downloadedAt || "",
+          history: Array.isArray(match.history) ? match.history : [],
         };
         if (match.downloaded) downloadedCache[ref] = true; else delete downloadedCache[ref];
         lastLocalChangeAt[ref] = Date.now();
@@ -1078,21 +1079,22 @@
     });
   }
 
-  // Auto-reopens a Rejected listing once the CRM's own category genuinely
-  // advances (e.g. a reshoot's photos land in Upload Pending after a
-  // rejection). The Apps Script side (reopenOnCategoryChange) has always
-  // been able to do this — it's wired all the way through background.js —
-  // but nothing ever actually called it from here, so a rejected listing
-  // just sat showing "Rejected" forever even after real new photos showed
-  // up. syncMetaIfNeeded above deliberately won't help with this: once a
-  // category is captured it's locked in for good, by design, so the only
-  // way to notice "this category actually changed" is to compare the
-  // *live* DOM value against what's on file every pass, which is exactly
-  // what this does.
+  // Auto-reopens a Rejected or Completed listing once the CRM's own
+  // category genuinely advances (e.g. a reshoot's photos land in Upload
+  // Pending after a rejection, or an agent requests updated photos of a
+  // listing that was already Completed). The Apps Script side
+  // (reopenOnCategoryChange) has always been able to do this — it's wired
+  // all the way through background.js — but nothing ever actually called
+  // it from here, so a listing just sat showing "Rejected"/"Completed"
+  // forever even after real new work showed up. syncMetaIfNeeded above
+  // deliberately won't help with this: once a category is captured it's
+  // locked in for good, by design, so the only way to notice "this
+  // category actually changed" is to compare the *live* DOM value against
+  // what's on file every pass, which is exactly what this does.
   function maybeReopenOnRecategorize(ref, liveCrmStatus, title) {
     if (!ref || !liveCrmStatus) return;
     const entry = assignmentCache[ref];
-    if (!entry || entry.status !== "Rejected") return;
+    if (!entry || (entry.status !== "Rejected" && entry.status !== "Completed")) return;
     if (!CATEGORY_OPTIONS.includes(liveCrmStatus)) return;
     if (liveCrmStatus === entry.crmStatus) return; // nothing's actually changed
 
@@ -1110,7 +1112,10 @@
         // Reflect it locally right away rather than waiting up to 15s for
         // the next poll — same lastLocalChangeAt protection every other
         // optimistic update here uses, so a stale poll can't clobber it.
-        assignmentCache[ref] = { ...entry, editor: "", status: "Unassigned", crmStatus: liveCrmStatus };
+        // downloadedAt/downloadedCache cleared too, matching the backend
+        // reset — whatever was downloaded belongs to the old shoot.
+        assignmentCache[ref] = { ...entry, editor: "", status: "Unassigned", crmStatus: liveCrmStatus, downloadedAt: "" };
+        delete downloadedCache[ref];
         lastLocalChangeAt[ref] = Date.now();
         processRows();
       }
@@ -1462,6 +1467,7 @@
             reassignedBy:   a.reassignedBy   || "",
             reassignedAt:   a.reassignedAt   || "",
             unassignedAt:   a.unassignedAt   || "",
+            history:        Array.isArray(a.history) ? a.history : [],
           };
           if (a.downloaded) freshDownloaded[a.ref] = true;
         });
@@ -2516,9 +2522,43 @@
           }]
         : [];
 
+      // Events that only exist in the raw History log, not as a dedicated
+      // flat "AtColumn" — recategorized/downloaded_cleared always (no flat
+      // column exists for either), plus any "downloaded" log entries that
+      // AREN'T the current downloadedAt (which is already shown via the
+      // flat-field row above). That second part matters specifically once
+      // a reopen clears downloadedAt: the flat-field row disappears, but
+      // the original download was still real and stays in the log —
+      // without this it would silently vanish from the visible timeline.
+      const rawLogEvents = (Array.isArray(entry && entry.history) ? entry.history : [])
+        .filter(e => e && (
+          e.type === "recategorized" ||
+          e.type === "downloaded_cleared" ||
+          (e.type === "downloaded" && e.ts !== (entry && entry.downloadedAt))
+        ))
+        .map(e => {
+          if (e.type === "recategorized") {
+            return {
+              label: "Recategorized", color: "#fbbf24", dot: "recategorized", ts: e.ts,
+              detail: e.from && e.to ? `${e.from} \u2192 ${e.to}` : null,
+            };
+          }
+          if (e.type === "downloaded_cleared") {
+            return {
+              label: "Download Cleared", color: "#9ca3af", dot: "downloaded_cleared", ts: e.ts,
+              detail: e.reason || null,
+            };
+          }
+          return {
+            label: "Downloaded", color: "#60a5fa", dot: "downloaded", ts: e.ts,
+            detail: e.editor ? `By: ${e.editor}` : null,
+          };
+        });
+
       const activeEvents = [
         ...events.map(ev => ({ ...ev, ts: entry && entry[ev.key] ? entry[ev.key] : null })),
         ...reassignEvent,
+        ...rawLogEvents,
       ]
         .filter(ev => ev.ts)
         .sort((a, b) => new Date(a.ts) - new Date(b.ts));
@@ -2618,6 +2658,7 @@
           bedrooms:       match.bedrooms        || "",
           crmStatus:      match.crmStatus       || "",
           downloadedAt:   match.downloadedAt    || "",
+          history:        Array.isArray(match.history) ? match.history : [],
         };
       }
       renderTimeline(match || null);

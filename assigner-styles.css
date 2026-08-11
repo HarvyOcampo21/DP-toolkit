@@ -492,6 +492,8 @@
 .dp-dot-rejected    { color: #ef9a9a; background: rgba(239,154,154,0.2); }
 .dp-dot-reassigned  { color: #f472b6; background: rgba(244,114,182,0.2); }
 .dp-dot-downloaded  { color: #60a5fa; background: rgba(96,165,250,0.2); }
+.dp-dot-recategorized     { color: #fbbf24; background: rgba(251,191,36,0.2); }
+.dp-dot-downloaded_cleared { color: #9ca3af; background: rgba(156,163,175,0.2); }
 
 .dp-timeline-line {
   width: 2px; flex: 1; background: #2b2f3d; margin-top: 4px; min-height: 20px;

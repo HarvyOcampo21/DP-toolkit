@@ -66,6 +66,11 @@ const CHANGELOG = [
   { version: 40, notes: [
     "Fixed Time History also missing \u201cAssigned by\u201d and reassignment details \u2014 same root cause as the v39 download-time fix, now closed for every field the timeline shows.",
   ]},
+  { version: 41, notes: [
+    "Completed listings now auto-reopen for reassignment too when the CRM shows genuinely new work waiting (e.g. an agent requests a reshoot of a property that already had its photos completed) \u2014 previously this only worked for Rejected listings.",
+    "Reopening also clears the \u201cDownloaded\u201d checkbox now, since old downloads belong to the previous shoot, not the new one.",
+    "Time History now shows the full reopen story \u2014 category change, the old download being cleared, and the reset \u2014 not just the parts that already had a place to display.",
+  ]},
 ];
 
 const card = document.getElementById("card");
