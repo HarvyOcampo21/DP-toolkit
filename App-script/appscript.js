@@ -17,16 +17,12 @@ var SHEET_ID  = "19UgIXRizvOcly1UBKJuQIcKe0s4KuSEPuPUOqc5zN-8";
 var CACHE_KEY = "dp_sheet_data";
 var CACHE_TTL = 25; // seconds
 
-// Separate cache for the Assigner's read endpoint (getAssignerAssignments) —
-// this is by far the most frequently called endpoint in the whole script
-// (every editor's extension polls it every 15s, every open dashboard tab
-// polls it every 8s), yet it previously had no caching at all, unlike
-// getAllSheetData above. TTL is intentionally shorter than the extension's
-// 15s poll interval — long enough to collapse near-simultaneous polls from
-// multiple editors/tabs into a single sheet read, short enough that data
-// still feels live rather than stale.
-var ASSIGNER_CACHE_KEY = "dp_assigner_data";
-var ASSIGNER_CACHE_TTL = 10; // seconds
+// Real-time mode: the Assigner's read endpoint (getAssignerAssignments) is
+// intentionally UNCACHED — every call does a fresh sheet read, so the
+// extension's tightened ~3s poll always gets the true current state rather
+// than up-to-10s-stale cached data. ASSIGNER_CACHE_KEY/TTL removed along
+// with it; bustAssignerCache() below is kept as a harmless no-op so every
+// existing call site still works without needing to be touched individually.
 
 var COPIER_HEADERS = [
   "Date Uploaded",
@@ -211,14 +207,10 @@ function bustCache() {
   } catch(e) {}
 }
 
-// Separate from bustCache() above — invalidates only the Assigner's own
-// cache (see ASSIGNER_CACHE_KEY), called at the end of every successful
-// assignerDoPost write so nobody ever sees their own change reflected late.
-function bustAssignerCache() {
-  try {
-    CacheService.getScriptCache().remove(ASSIGNER_CACHE_KEY);
-  } catch(e) {}
-}
+// No-op now that the Assigner read path is fully uncached (there's nothing
+// left to invalidate) — kept in place purely so every existing call site
+// at the end of a successful assignerDoPost write still works untouched.
+function bustAssignerCache() {}
 
 // ── Delete row ────────────────────────────────────────────────────────────────
 
@@ -627,22 +619,11 @@ function fmt(d) {
 
 // ── GET: return all tracked assignments ──────────────────────────────────
 // By far the most frequently called function in this script — every
-// editor's extension polls this every 15s, and every open dashboard tab
-// polls it every 8s. Previously did a full uncached sheet read on every
-// single call; now mirrors the same CacheService pattern getAllSheetData
-// already used successfully. Cache is busted at the end of every
-// successful assignerDoPost write (see bustAssignerCache), so a person's
-// own change is never served stale back to them.
+// editor's extension now polls this every ~3s. Deliberately UNCACHED: this
+// is the real-time read path, so every call does a live sheet read rather
+// than risking even a few seconds of staleness from a cache layer.
 function getAssignerAssignments(token) {
   if (!checkToken(token)) return jsonResponse({ error: "Unauthorized" });
-
-  const cache = CacheService.getScriptCache();
-  const cached = cache.get(ASSIGNER_CACHE_KEY);
-  if (cached) {
-    return ContentService
-      .createTextOutput(cached)
-      .setMimeType(ContentService.MimeType.JSON);
-  }
 
   const sheet = getAssignerSheet();
   const rows = sheet.getDataRange().getValues();
@@ -671,13 +652,6 @@ function getAssignerAssignments(token) {
     unassignedAt:    fmt(r[20]),
     history:         parseHistory(r[21]),
   }))});
-
-  try {
-    if (json.length < 95000) cache.put(ASSIGNER_CACHE_KEY, json, ASSIGNER_CACHE_TTL);
-  } catch (cacheErr) {
-    // Cache write failed silently — data still returned correctly, next
-    // call just falls back to a fresh sheet read same as before this change.
-  }
 
   return ContentService
     .createTextOutput(json)
@@ -925,52 +899,68 @@ function assignerDoPost_impl(p) {
   }
 
   // ── reopenOnCategoryChange ──────────────────────────────────────────────
-  // Handles a specific real-world pattern: a listing gets rejected while its
-  // category is Photos For QC or Stock Photos For QC (agent-submitted/
-  // archive photos weren't good enough), the rejection is forwarded to the
-  // photographer scheduler, the agent books a reshoot, and eventually the
-  // CRM's own Status badge on that listing advances to Upload Pending —
-  // meaning genuinely new, professional photos are now waiting. Without
-  // this, the listing just sits showing "Rejected" forever, because nothing
-  // in the normal assign/reject flow ever gets triggered again on it.
+  // Handles a specific real-world pattern: a listing gets Rejected or
+  // Completed while its category is one of the tracked ones (agent-
+  // submitted/archive photos weren't good enough, or the agent simply
+  // wants updated photos of the property's current condition), a reshoot
+  // gets booked, and eventually the CRM's own Status badge on that listing
+  // advances to a new category — meaning genuinely new work is now
+  // waiting. Without this, the listing just sits showing Rejected/
+  // Completed forever, because nothing in the normal assign flow ever
+  // gets triggered again on it.
   //
   // Only fires when the *current* assignment status is exactly "Rejected"
-  // and the newly-observed category is a real change — never touches a
-  // listing that's Assigned/In Progress/Completed/On Hold, and does nothing
-  // if the category the client is reporting is the same one already on file
-  // (e.g. a page reload re-sending the same category isn't a "change").
+  // or "Completed", and the newly-observed category is a real change —
+  // never touches a listing that's Assigned/In Progress/On Hold, and does
+  // nothing if the category the client is reporting is the same one
+  // already on file (e.g. a page reload re-sending the same category
+  // isn't a "change").
   //
   // The listing is reset to Unassigned (open for anyone to pick up, since
-  // it's effectively a brand new task now) and its Category is updated to
-  // the new one — overriding the normal write-once Category rule, since
-  // this is a deliberate, distinct new task rather than metadata drift.
-  // Nothing is lost: the previous category and the reset itself are both
-  // appended to History, alongside the "rejected" event already logged
-  // when the rejection first happened.
+  // it's effectively a brand new task now), its Category is updated to the
+  // new one — overriding the normal write-once Category rule, since this
+  // is a deliberate, distinct new task rather than metadata drift — and
+  // Downloaded is cleared, since whatever was downloaded before this point
+  // belongs to the old shoot, not the new one, and leaving it checked
+  // could make someone think they already have the current photos when
+  // they don't. Nothing is lost: the previous category, the downloaded
+  // reset, and the unassign are all appended to History individually,
+  // alongside whatever was already logged when the listing first became
+  // Rejected/Completed.
   if (p.action === "reopenOnCategoryChange") {
     const newCategory = ASSIGNER_TRACKED_CATEGORIES.indexOf(p.newCategory) > -1 ? p.newCategory : "";
     if (ri === -1 || !newCategory) return jsonResponse({ ref: p.ref, reopened: false });
 
     const prevStatus   = ex(ASSIGNER_COL.STATUS);
     const prevCategory = ex(ASSIGNER_COL.CRM_STATUS);
-    if (prevStatus !== "Rejected" || newCategory === prevCategory) {
+    const reopenableFrom = prevStatus === "Rejected" || prevStatus === "Completed";
+    if (!reopenableFrom || newCategory === prevCategory) {
       return jsonResponse({ ref: p.ref, reopened: false });
     }
 
-    const prevEditor = ex(ASSIGNER_COL.EDITOR);
+    const prevEditor     = ex(ASSIGNER_COL.EDITOR);
+    const wasDownloaded  = isTruthyCell(ex(ASSIGNER_COL.DOWNLOADED));
     let historyJson = ex(ASSIGNER_COL.HISTORY);
+
     historyJson = appendHistory(historyJson, {
       type: "recategorized", ts: now.toISOString(),
       from: prevCategory || "(uncategorized)", to: newCategory,
     });
+    if (wasDownloaded) {
+      historyJson = appendHistory(historyJson, {
+        type: "downloaded_cleared", ts: now.toISOString(),
+        reason: "Previous download is from the old shoot — cleared on reopen",
+      });
+    }
     historyJson = appendHistory(historyJson, {
       type: "unassigned", ts: now.toISOString(), editor: prevEditor,
-      reason: "Auto-reopened — category advanced to " + newCategory + " after rejection",
+      reason: "Auto-reopened — category advanced to " + newCategory + " after " + prevStatus.toLowerCase(),
     });
 
     sheet.getRange(ri, 1, 1, ASSIGNER_HEADERS.length).setValues([fullRow({
       editor: "", status: "Unassigned", updatedAt: now, unassignedAt: now,
       crmStatus: newCategory, title: p.title || ex(ASSIGNER_COL.TITLE),
+      downloaded: false, downloadedAt: "",
       history: historyJson,
     })]);
     return jsonResponse({ ref: p.ref, reopened: true, category: newCategory });
