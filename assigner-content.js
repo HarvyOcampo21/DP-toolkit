@@ -10,7 +10,7 @@
   const SHEET_URL   = "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
   const SHEET_TOKEN = "DPPE";
 
-  const EDITORS = ["Harvy", "Alvin", "Jabir", "Mark", "Rohith", "Sudheep", "Muneer"];
+  const EDITORS = ["Harvy", "Jabir", "Mark", "Sudheep"];
   const STATUS_OPTIONS = ["Offplan Pending", "Photos For QC", "Stock Photos For QC", "Upload Pending", "Pending", "Scheduled"];
   // The dashboard/sheet only ever tracks these 3 — they represent a fixed
   // task category (what kind of work the listing needs), not the CRM's
@@ -379,6 +379,20 @@
     const el = row.querySelector(".badge.ref");
     return el ? el.textContent.trim() : null;
   }
+  // Some CRM status values are just an "approved" follow-on state of one
+  // of our tracked categories, not a genuinely different category — e.g.
+  // once QC approves what was submitted as "Photos For QC", the CRM's own
+  // badge changes to "QC Approved". Left unmapped, these fall outside
+  // CATEGORY_OPTIONS entirely and get silently ignored everywhere that
+  // cares about category (syncMeta write-once tracking, reopen-on-
+  // recategorize) — normalizing them here, at the single source every
+  // caller reads from, means every one of those benefits without needing
+  // its own mapping.
+  const CRM_STATUS_ALIASES = {
+    "QC Approved": "Photos For QC",
+    "Stock Photos QC Approved": "Stock Photos For QC",
+  };
+
   // Reads the CRM's own listing status pill (e.g. "Offplan Pending",
   // "Photos For QC", "Upload Pending", "Pending", "Scheduled") — this is
   // separate from our extension's Assign/Hold/Complete tracking status.
@@ -388,9 +402,9 @@
       const label = cell.querySelector("label");
       if (label && label.textContent.trim() === "Status") {
         const badge = cell.querySelector(".m-badge, [class*='badge']");
-        if (badge) return badge.textContent.trim();
-        const text = cell.textContent.replace(label.textContent, "").trim();
-        return text || null;
+        const raw = badge ? badge.textContent.trim() : cell.textContent.replace(label.textContent, "").trim();
+        if (!raw) return null;
+        return CRM_STATUS_ALIASES[raw] || raw;
       }
     }
     return null;

@@ -5,12 +5,9 @@
 // assigner-content.js. Add/move names here as the team changes.
 const NAME_ROLES = {
   Harvy:   "senior",
-  Alvin:   "senior",
   Mark:    "senior",
   Sudheep: "senior",
   Jabir:   "junior",
-  Rohith:  "junior",
-  Muneer:  "junior",
 };
 function roleForName(name) {
   return NAME_ROLES[name] || "junior"; // unknown names default to the safer role

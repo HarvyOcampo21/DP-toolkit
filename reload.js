@@ -71,6 +71,10 @@ const CHANGELOG = [
     "Reopening also clears the \u201cDownloaded\u201d checkbox now, since old downloads belong to the previous shoot, not the new one.",
     "Time History now shows the full reopen story \u2014 category change, the old download being cleared, and the reset \u2014 not just the parts that already had a place to display.",
   ]},
+  { version: 42, notes: [
+    "\u201cQC Approved\u201d and \u201cStock Photos QC Approved\u201d are now treated the same as \u201cPhotos For QC\u201d and \u201cStock Photos For QC\u201d for category tracking \u2014 previously these approved-status variants weren't recognized at all, so they were silently ignored by category tracking and reopen-on-recategorize.",
+    "Removed Rohith, Alvin, and Muneer from the name list.",
+  ]},
 ];
 
 const card = document.getElementById("card");
