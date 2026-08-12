@@ -75,6 +75,9 @@ const CHANGELOG = [
     "\u201cQC Approved\u201d and \u201cStock Photos QC Approved\u201d are now treated the same as \u201cPhotos For QC\u201d and \u201cStock Photos For QC\u201d for category tracking \u2014 previously these approved-status variants weren't recognized at all, so they were silently ignored by category tracking and reopen-on-recategorize.",
     "Removed Rohith, Alvin, and Muneer from the name list.",
   ]},
+  { version: 43, notes: [
+    "Completing a listing marked \u201cQC Approved\u201d or \u201cStock Photos QC Approved\u201d now logs to the Sheet automatically \u2014 List Type set to Agent Request, with the correct sub-type (Use my own photos / Stock photos) picked automatically \u2014 same as Offplan/Upload Pending already did. Still governed by the same auto-log toggle, so turning that off stops all of this at once.",
+  ]},
 ];
 
 const card = document.getElementById("card");

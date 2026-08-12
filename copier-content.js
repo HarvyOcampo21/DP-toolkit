@@ -823,7 +823,9 @@ function setHookEnabled(val) {
     const data   = gatherAllData();
     const status = getListingStatus();
 
-    // ── Determine List Type from page status (same logic as Complete hook) ──
+    // ── Determine List Type from page status (Complete hook now auto-
+    // submits Agent Request too — this manual button still opens the
+    // modal for it, see below) ──
     let listType = getListTypeFromStatus(status);
 
     // Fallback: if status not detected, use photographer presence
@@ -975,6 +977,8 @@ function setHookEnabled(val) {
       "Offplan Pending",
       "Upload Pending",
       "QC Approved",
+      "Stock Photos QC Approved",
+      "Stock Photos For QC",
       "Offplan Approved",
       "Upload Approved",
     ];
@@ -998,12 +1002,22 @@ function setHookEnabled(val) {
     return allText || "";
   }
 
-  function getListTypeFromStatus(status) {
+  // Determines both List Type and (for Agent Request) the sub-type from
+  // the CRM's status badge in one place, so both are always derived
+  // consistently. "stock" is checked before the generic "qc" match since
+  // "Stock Photos QC Approved" contains both substrings — checking qc
+  // first would misclassify it as a plain (non-stock) QC approval.
+  function getListTypeAndSubType(status) {
     const s = status.toLowerCase();
-    if (s.includes("offplan")) return "Brochure";
-    if (s.includes("qc")) return "Agent Request";
-    if (s.includes("upload")) return "Photo Request";
-    return "";
+    if (s.includes("offplan")) return { listType: "Brochure", subType: "" };
+    if (s.includes("stock"))   return { listType: "Agent Request", subType: "Stock photos" };
+    if (s.includes("qc"))      return { listType: "Agent Request", subType: "Use my own photos" };
+    if (s.includes("upload"))  return { listType: "Photo Request", subType: "" };
+    return { listType: "", subType: "" };
+  }
+
+  function getListTypeFromStatus(status) {
+    return getListTypeAndSubType(status).listType;
   }
 
   /* =======================
@@ -1042,7 +1056,7 @@ function setHookEnabled(val) {
       "click",
       function (e) {
         const status = getListingStatus();
-        const listType = getListTypeFromStatus(status);
+        const { listType, subType } = getListTypeAndSubType(status);
 
         if (!isHookEnabled()) return;
         if (!listType) return;
@@ -1061,19 +1075,17 @@ function setHookEnabled(val) {
           navigator.clipboard.writeText(listingInfo).catch(() => {});
         }
 
-        if (listType === "Agent Request") {
-          setTimeout(function () {
-            openLogModal();
-            showToast(
-              "📋 Log to Sheet opened — Agent Request detected.\n📎 Listing info copied!",
-              false,
-            );
-          }, 300);
-        } else {
-          setTimeout(function () {
-            quickLogWithType(listType);
-          }, 300);
-        }
+        // Agent Request (QC Approved / Stock Photos QC Approved) now
+        // auto-submits the same way Brochure/Photo Request already did,
+        // instead of opening the modal for a manual confirming click —
+        // both listType and subType are fully determined from the status
+        // badge above, so there's nothing left requiring a person's input.
+        // Gated by the same auto-log toggle as everything else here, so
+        // turning that off is still the one switch that disables all of
+        // this at once.
+        setTimeout(function () {
+          quickLogWithType(listType, subType);
+        }, 300);
       },
       true,
     );
@@ -1144,7 +1156,7 @@ function setHookEnabled(val) {
     true,
   );
 
-  function quickLogWithType(listType) {
+  function quickLogWithType(listType, subType) {
     const data = gatherAllData();
 
     const now = new Date();
@@ -1159,14 +1171,15 @@ function setHookEnabled(val) {
       ...data,
       status: "Uploaded",
       listType: listType,
-      subType: "",
+      subType: subType || "",
       receivedDate: formattedDate,
       rejectionReason: "",
       notes: "",
       reShoot: false,
     };
 
-    showToast("📤 Logging as " + listType + "…");
+    const label = listType + (subType ? " · " + subType : "");
+    showToast("📤 Logging as " + label + "…");
 
     chrome.runtime.sendMessage(
       { type: "LOG_TO_SHEET", payload },
@@ -1187,7 +1200,7 @@ function setHookEnabled(val) {
         } else if (response?.success) {
           showToast(
             "✅ Auto-logged as " +
-              listType +
+              label +
               " — Uploaded!\n📎 Listing info copied to clipboard!",
           );
         } else {
