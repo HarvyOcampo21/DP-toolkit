@@ -10,10 +10,10 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 const ASSIGNER_CONFIG = {
-  // Now pointing at the single merged Apps Script deployment (same script +
-  // spreadsheet the Copier uses) instead of its own separate one. The old
-  // Assigner-only deployment can be retired once this is confirmed working.
-  WEB_APP_URL: "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec",
+  // Split back out to its own dedicated Apps Script deployment + spreadsheet
+  // (separate from Copier's) to remove shared execution-quota/lock
+  // contention between high-frequency Assigner polling and Copier writes.
+  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbzpHle7iubZvZTSEtY3yUGdtQIwiFaKIQFSkRBnYFHDgYku9Gyt-Iwb30jGduddY2K0/exec",
   TOKEN: "DPPE",
 };
 

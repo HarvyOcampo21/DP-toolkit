@@ -78,6 +78,9 @@ const CHANGELOG = [
   { version: 43, notes: [
     "Completing a listing marked \u201cQC Approved\u201d or \u201cStock Photos QC Approved\u201d now logs to the Sheet automatically \u2014 List Type set to Agent Request, with the correct sub-type (Use my own photos / Stock photos) picked automatically \u2014 same as Offplan/Upload Pending already did. Still governed by the same auto-log toggle, so turning that off stops all of this at once.",
   ]},
+    { version: 44, notes: [
+    "Backend split for speed — Assignment data now runs on its own dedicated server, so it won't slow down or get slowed down by other activity",
+  ]},
 ];
 
 const card = document.getElementById("card");
