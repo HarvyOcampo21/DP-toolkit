@@ -17,7 +17,7 @@ const ASSIGNER_CONFIG = {
   TOKEN: "DPPE",
 };
 
-const COPIER_APPS_SCRIPT_URL = "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
+const COPIER_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
 
 // Explicit exceptions for anyone whose real @drivenproperties.com address
 // doesn't follow the plain {firstname}@drivenproperties.com pattern (e.g.

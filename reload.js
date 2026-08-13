@@ -81,6 +81,10 @@ const CHANGELOG = [
     { version: 44, notes: [
     "Backend split for speed — Assignment data now runs on its own dedicated server, so it won't slow down or get slowed down by other activity",
   ]},
+    { version: 45, notes: [
+    "Fixed Time History showing the wrong \u201cAssigned\u201d time and hiding earlier reassignments \u2014 reassigning a listing was silently overwriting the original assignment timestamp, and only the most recent reassignment was ever visible even when a listing had been passed around several times.",
+    "The Assignment Dashboard now has a \u201cMonth\u201d filter \u2014 always the 1st of the current month through today, automatically advancing each day with no need to update it.",
+  ]},
 ];
 
 const card = document.getElementById("card");
