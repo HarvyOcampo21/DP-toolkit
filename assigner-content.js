@@ -409,6 +409,22 @@
     }
     return null;
   }
+  // Same lookup as extractCrmStatus, but WITHOUT the alias mapping — needed
+  // specifically for reopen-on-recategorize (see maybeReopenOnRecategorize),
+  // which has to tell "QC Approved" apart from the "Photos For QC" it
+  // normally counts as, rather than having that distinction erased.
+  function extractCrmStatusRaw(row) {
+    const cells = row.querySelectorAll(".table-cell");
+    for (const cell of cells) {
+      const label = cell.querySelector("label");
+      if (label && label.textContent.trim() === "Status") {
+        const badge = cell.querySelector(".m-badge, [class*='badge']");
+        const raw = badge ? badge.textContent.trim() : cell.textContent.replace(label.textContent, "").trim();
+        return raw || null;
+      }
+    }
+    return null;
+  }
   function bedroomBucket(n) {
     if (n === null || n === undefined) return null;
     return n >= 5 ? "5+" : String(n);
@@ -1105,19 +1121,35 @@
   // locked in for good, by design, so the only way to notice "this
   // category actually changed" is to compare the *live* DOM value against
   // what's on file every pass, which is exactly what this does.
-  function maybeReopenOnRecategorize(ref, liveCrmStatus, title) {
+  //
+  // Important: liveCrmStatus here is the ALIASED value (e.g. "QC Approved"
+  // reads as "Photos For QC") — deliberately NOT compared against
+  // entry.crmStatus (the locked Category) to decide whether to even ask.
+  // A listing rejected out of "Photos For QC" that has the CRM auto-approve
+  // those same rejected photos, and THEN gets a genuine reshoot resubmitted
+  // into "Photos For QC" again, shows the exact same aliased string both
+  // before and after — comparing aliased strings client-side would silently
+  // swallow that resubmission forever. rawStatus (un-aliased) is forwarded
+  // instead so the server can tell the two apart; see reopenOnCategoryChange
+  // in appscript.js for the actual "did this really change" logic. This
+  // function's job is just: is the category currently one we track, is the
+  // listing sitting Rejected/Completed, and have we not already tried this
+  // exact raw reading — the server decides the rest, and is safe to call
+  // repeatedly (it no-ops when nothing's actually new).
+  function maybeReopenOnRecategorize(ref, liveCrmStatus, rawCrmStatus, title) {
     if (!ref || !liveCrmStatus) return;
     const entry = assignmentCache[ref];
     if (!entry || (entry.status !== "Rejected" && entry.status !== "Completed")) return;
     if (!CATEGORY_OPTIONS.includes(liveCrmStatus)) return;
-    if (liveCrmStatus === entry.crmStatus) return; // nothing's actually changed
 
-    const key = "reopen:" + liveCrmStatus;
-    if (metaSyncCache[ref] === key) return; // already attempted this exact transition
+    const raw = rawCrmStatus || liveCrmStatus;
+    const key = "reopen:" + raw;
+    if (metaSyncCache[ref] === key) return; // already attempted this exact raw reading
+
     metaSyncCache[ref] = key;
 
     safeSendMessage(
-      { type: "DP_REOPEN_ON_RECATEGORIZE", ref, newCategory: liveCrmStatus, title: title || entry.title || "" },
+      { type: "DP_REOPEN_ON_RECATEGORIZE", ref, newCategory: liveCrmStatus, rawStatus: raw, title: title || entry.title || "" },
       resp => {
         if (!(resp && resp.ok && resp.data && resp.data.reopened)) {
           metaSyncCache[ref] = ""; // let the next pass retry (e.g. no name selected yet)
@@ -1151,9 +1183,10 @@
       const crmStatus = extractCrmStatus(row);
       if (crmStatus) row.dataset.dpCrmStatus = crmStatus;
       else delete row.dataset.dpCrmStatus;
+      const crmStatusRaw = extractCrmStatusRaw(row);
 
       syncMetaIfNeeded(ref, bucket, crmStatus, extractTitle(row));
-      maybeReopenOnRecategorize(ref, crmStatus, extractTitle(row));
+      maybeReopenOnRecategorize(ref, crmStatus, crmStatusRaw, extractTitle(row));
 
       const inner = row.querySelector(".table-row-inner.is-dropdown");
       if (!inner) return;

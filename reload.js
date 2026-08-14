@@ -85,6 +85,9 @@ const CHANGELOG = [
     "Fixed Time History showing the wrong \u201cAssigned\u201d time and hiding earlier reassignments \u2014 reassigning a listing was silently overwriting the original assignment timestamp, and only the most recent reassignment was ever visible even when a listing had been passed around several times.",
     "The Assignment Dashboard now has a \u201cMonth\u201d filter \u2014 always the 1st of the current month through today, automatically advancing each day with no need to update it.",
   ]},
+    { version: 46, notes: [
+    "Fixed Rejected listings not reopening for reassignment when the CRM sends the reshoot's new photos back into the SAME category they were rejected from (e.g. Photos For QC \u2192 the CRM auto-approves the old rejected photos \u2192 new photos come back into Photos For QC again) \u2014 previously this exact round trip looked identical to \u201cnothing changed\u201d and the listing stayed stuck on Rejected forever. Reopening across a different category (e.g. into Upload Pending) already worked and is unaffected.",
+  ]},
 ];
 
 const card = document.getElementById("card");

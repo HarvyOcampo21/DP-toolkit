@@ -1101,6 +1101,57 @@ function setHookEnabled(val) {
      Pre-fills: Status = Rejected · List Type = Agent Request ·
      Agent Request Type = Use my own photos · Rejection Reason = their textarea
   ======================= */
+
+  // Reads a checkbox's visible label text, trying the common markup patterns
+  // in roughly the order a real form is likely to use one of them:
+  //   1) <label for="checkboxId"> elsewhere in the modal
+  //   2) the checkbox is itself wrapped inside a <label>...</label>
+  //   3) plain text sitting in the next sibling element
+  //   4) falling back to the immediate parent's text (checkbox + label text
+  //      sitting side by side with no label/for wiring at all)
+  // Whichever matches, the checkbox's own accessible name never contributes
+  // text, so this never returns anything but the human-readable reason.
+  function getCheckboxLabelText(modalCard, checkbox) {
+    if (checkbox.id) {
+      const forLabel = modalCard.querySelector(
+        'label[for="' + CSS.escape(checkbox.id) + '"]',
+      );
+      if (forLabel && forLabel.textContent.trim()) return forLabel.textContent.trim();
+    }
+    const wrappingLabel = checkbox.closest("label");
+    if (wrappingLabel && wrappingLabel.textContent.trim())
+      return wrappingLabel.textContent.trim();
+    if (
+      checkbox.nextElementSibling &&
+      checkbox.nextElementSibling.textContent.trim()
+    )
+      return checkbox.nextElementSibling.textContent.trim();
+    if (checkbox.parentElement && checkbox.parentElement.textContent.trim())
+      return checkbox.parentElement.textContent.trim();
+    return "";
+  }
+
+  // Combines every ticked "Reject Reasons" checkbox with whatever's typed in
+  // the free-text box underneath (used both as the "Other" specify field and,
+  // per the CRM's own validation, as a general required reason) into one
+  // string for our Rejection Reason field — so nothing ticked on the CRM side
+  // has to be retyped by hand on ours.
+  function buildRejectionReasonText(modalCard, reasonField) {
+    const checkedLabels = Array.from(
+      modalCard.querySelectorAll('input[type="checkbox"]'),
+    )
+      .filter((cb) => cb.checked)
+      .map((cb) => getCheckboxLabelText(modalCard, cb))
+      .filter(Boolean);
+
+    const freeText = reasonField.value.trim();
+
+    const parts = [];
+    if (checkedLabels.length) parts.push(checkedLabels.join(", "));
+    if (freeText) parts.push(freeText);
+    return parts.join("\n");
+  }
+
   document.addEventListener(
     "click",
     function (e) {
@@ -1123,7 +1174,7 @@ function setHookEnabled(val) {
 
       if (!isRejectModal || !reasonField) return;
 
-      const rejectionReason = reasonField.value.trim();
+      const rejectionReason = buildRejectionReasonText(modalCard, reasonField);
 
       // Copy listing info to clipboard, same as Complete
       const listingInfo = [
