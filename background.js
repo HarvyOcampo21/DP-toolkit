@@ -17,7 +17,7 @@ const ASSIGNER_CONFIG = {
   TOKEN: "DPPE",
 };
 
-const COPIER_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
+const COPIER_APPS_SCRIPT_URL = "https://script.google.com/a/macros/drivenproperties.com/s/AKfycbxRnU165B4OZoIyc-sDFrkQB-tePNsb9MBrMWJa7IRZuTWzzITQvxT6ES7eSCVzc6S-/exec";
 
 // Explicit exceptions for anyone whose real @drivenproperties.com address
 // doesn't follow the plain {firstname}@drivenproperties.com pattern (e.g.
@@ -374,23 +374,16 @@ function dispatchAssignerMessage(message, sendResponse) {
   if (message.type === "DP_SYNC_META") {
     postToAssignerSheet({ action: "syncMeta", ref: message.ref, editor: message.editor || "",
       status: message.status || "", bedrooms: message.bedrooms || "",
-      crmStatus: message.crmStatus || "", rawStatus: message.rawStatus || "",
-      title: message.title || "" }, sendResponse);
+      crmStatus: message.crmStatus || "", title: message.title || "" }, sendResponse);
     return true;
   }
 
   // Auto-reopens a Rejected listing when the CRM's own status has genuinely
   // moved on to a new category (e.g. a reshoot's photos are now in Upload
   // Pending) — see the matching Apps Script action for the full rationale.
-  // rawStatus (the un-aliased CRM badge text, e.g. "QC Approved" rather than
-  // the "Photos For QC" it maps to) is forwarded alongside newCategory so the
-  // server can tell a genuine same-category resubmission — which round-trips
-  // through the Approved alias — apart from a no-op re-poll of a status that
-  // never changed at all. See the Apps Script action for the full case.
   if (message.type === "DP_REOPEN_ON_RECATEGORIZE") {
     postToAssignerSheet({ action: "reopenOnCategoryChange", ref: message.ref,
-      newCategory: message.newCategory || "", rawStatus: message.rawStatus || message.newCategory || "",
-      title: message.title || "" }, sendResponse);
+      newCategory: message.newCategory || "", title: message.title || "" }, sendResponse);
     return true;
   }
 

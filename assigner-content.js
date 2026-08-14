@@ -409,22 +409,6 @@
     }
     return null;
   }
-  // Same lookup as extractCrmStatus, but WITHOUT the alias mapping — needed
-  // specifically for reopen-on-recategorize (see maybeReopenOnRecategorize),
-  // which has to tell "QC Approved" apart from the "Photos For QC" it
-  // normally counts as, rather than having that distinction erased.
-  function extractCrmStatusRaw(row) {
-    const cells = row.querySelectorAll(".table-cell");
-    for (const cell of cells) {
-      const label = cell.querySelector("label");
-      if (label && label.textContent.trim() === "Status") {
-        const badge = cell.querySelector(".m-badge, [class*='badge']");
-        const raw = badge ? badge.textContent.trim() : cell.textContent.replace(label.textContent, "").trim();
-        return raw || null;
-      }
-    }
-    return null;
-  }
   function bedroomBucket(n) {
     if (n === null || n === undefined) return null;
     return n >= 5 ? "5+" : String(n);
@@ -1121,35 +1105,19 @@
   // locked in for good, by design, so the only way to notice "this
   // category actually changed" is to compare the *live* DOM value against
   // what's on file every pass, which is exactly what this does.
-  //
-  // Important: liveCrmStatus here is the ALIASED value (e.g. "QC Approved"
-  // reads as "Photos For QC") — deliberately NOT compared against
-  // entry.crmStatus (the locked Category) to decide whether to even ask.
-  // A listing rejected out of "Photos For QC" that has the CRM auto-approve
-  // those same rejected photos, and THEN gets a genuine reshoot resubmitted
-  // into "Photos For QC" again, shows the exact same aliased string both
-  // before and after — comparing aliased strings client-side would silently
-  // swallow that resubmission forever. rawStatus (un-aliased) is forwarded
-  // instead so the server can tell the two apart; see reopenOnCategoryChange
-  // in appscript.js for the actual "did this really change" logic. This
-  // function's job is just: is the category currently one we track, is the
-  // listing sitting Rejected/Completed, and have we not already tried this
-  // exact raw reading — the server decides the rest, and is safe to call
-  // repeatedly (it no-ops when nothing's actually new).
-  function maybeReopenOnRecategorize(ref, liveCrmStatus, rawCrmStatus, title) {
+  function maybeReopenOnRecategorize(ref, liveCrmStatus, title) {
     if (!ref || !liveCrmStatus) return;
     const entry = assignmentCache[ref];
     if (!entry || (entry.status !== "Rejected" && entry.status !== "Completed")) return;
     if (!CATEGORY_OPTIONS.includes(liveCrmStatus)) return;
+    if (liveCrmStatus === entry.crmStatus) return; // nothing's actually changed
 
-    const raw = rawCrmStatus || liveCrmStatus;
-    const key = "reopen:" + raw;
-    if (metaSyncCache[ref] === key) return; // already attempted this exact raw reading
-
+    const key = "reopen:" + liveCrmStatus;
+    if (metaSyncCache[ref] === key) return; // already attempted this exact transition
     metaSyncCache[ref] = key;
 
     safeSendMessage(
-      { type: "DP_REOPEN_ON_RECATEGORIZE", ref, newCategory: liveCrmStatus, rawStatus: raw, title: title || entry.title || "" },
+      { type: "DP_REOPEN_ON_RECATEGORIZE", ref, newCategory: liveCrmStatus, title: title || entry.title || "" },
       resp => {
         if (!(resp && resp.ok && resp.data && resp.data.reopened)) {
           metaSyncCache[ref] = ""; // let the next pass retry (e.g. no name selected yet)
@@ -1183,10 +1151,9 @@
       const crmStatus = extractCrmStatus(row);
       if (crmStatus) row.dataset.dpCrmStatus = crmStatus;
       else delete row.dataset.dpCrmStatus;
-      const crmStatusRaw = extractCrmStatusRaw(row);
 
       syncMetaIfNeeded(ref, bucket, crmStatus, extractTitle(row));
-      maybeReopenOnRecategorize(ref, crmStatus, crmStatusRaw, extractTitle(row));
+      maybeReopenOnRecategorize(ref, crmStatus, extractTitle(row));
 
       const inner = row.querySelector(".table-row-inner.is-dropdown");
       if (!inner) return;
@@ -1581,7 +1548,6 @@
   }
 
   function startOfLocalDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-  function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
   // Monday of the calendar week containing d. getDay() is 0=Sun..6=Sat;
   // (day+6)%7 gives the number of days since the most recent Monday for
   // every day of the week, including Sunday (0 -> 6 days since Monday).
@@ -1620,15 +1586,6 @@
       // Jul 26 range. Clicking it again next week resolves to Jul 27 – Aug 2.
       const monday = startOfWeekMonday(now);
       return [monday, addDays(monday, 7)];
-    }
-    if (scope === "month") {
-      // 1st of the current month through the end of TODAY, not the whole
-      // month — e.g. on Aug 13 this is Aug 1–13, and on Aug 14 (no code
-      // change needed) it's automatically Aug 1–14, since both ends are
-      // computed fresh from "now" every time this runs rather than being
-      // a fixed range someone has to update.
-      const start = startOfMonth(now);
-      return [start, addDays(startOfLocalDay(now), 1)];
     }
     if (scope && scope.type === "custom") {
       if (!scope.start || !scope.end) return null;
@@ -2243,9 +2200,6 @@
     const weekBtn = Object.assign(document.createElement("button"), {
       type: "button", className: "dp-sort-btn", textContent: "Last 7 Days"
     });
-    const monthBtn = Object.assign(document.createElement("button"), {
-      type: "button", className: "dp-sort-btn", textContent: "Month"
-    });
     const allBtn = Object.assign(document.createElement("button"), {
       type: "button", className: "dp-sort-btn", textContent: "All time"
     });
@@ -2256,7 +2210,6 @@
     scopeRow.appendChild(yesterdayBtn);
     scopeRow.appendChild(thisWeekBtn);
     scopeRow.appendChild(weekBtn);
-    scopeRow.appendChild(monthBtn);
     scopeRow.appendChild(allBtn);
     scopeRow.appendChild(customBtn);
     modal.appendChild(scopeRow);
@@ -2367,7 +2320,6 @@
       if (s === "yesterday") return "assigned yesterday";
       if (s === "thisWeek") return "assigned this week (Mon–Sun)";
       if (s === "week") return "assigned in the last 7 days";
-      if (s === "month") return "assigned this month (month-to-date)";
       if (s === "all") return "assigned (all time)";
       if (s && s.type === "custom") return `assigned from ${s.start} to ${s.end}`;
       return "assigned";
@@ -2378,7 +2330,6 @@
       if (s === "yesterday") return `No listings assigned or put on hold yesterday ${suffix}`;
       if (s === "thisWeek") return `No listings assigned or put on hold this week ${suffix}`;
       if (s === "week") return `No listings assigned or put on hold in the last 7 days ${suffix}`;
-      if (s === "month") return `No listings assigned or put on hold this month (month-to-date) ${suffix}`;
       if (s === "all") return `No assigned or on-hold listings found ${suffix}`;
       if (s && s.type === "custom") return `No listings assigned or put on hold in that date range ${suffix}`;
       return `No listings found ${suffix}`;
@@ -2388,7 +2339,6 @@
       todayBtn.classList.toggle("is-active", scope === "today");
       yesterdayBtn.classList.toggle("is-active", scope === "yesterday");
       weekBtn.classList.toggle("is-active", scope === "week");
-      monthBtn.classList.toggle("is-active", scope === "month");
       thisWeekBtn.classList.toggle("is-active", scope === "thisWeek");
       allBtn.classList.toggle("is-active", scope === "all");
       customBtn.classList.toggle("is-active", scope && scope.type === "custom");
@@ -2459,7 +2409,6 @@
     todayBtn.addEventListener("click", () => selectScope("today"));
     yesterdayBtn.addEventListener("click", () => selectScope("yesterday"));
     weekBtn.addEventListener("click", () => selectScope("week"));
-    monthBtn.addEventListener("click", () => selectScope("month"));
     thisWeekBtn.addEventListener("click", () => selectScope("thisWeek"));
     allBtn.addEventListener("click", () => selectScope("all"));
     customBtn.addEventListener("click", () => {
@@ -2589,22 +2538,17 @@
 
       // Events that only exist in the raw History log, not as a dedicated
       // flat "AtColumn" — recategorized/downloaded_cleared always (no flat
-      // column exists for either), plus any "downloaded"/"reassigned"/
-      // "assigned" log entries that AREN'T the one already shown via a
-      // flat-field row above. The flat reassignedFrom/To/By/At columns
-      // only ever hold the MOST RECENT reassignment — every earlier one
-      // only survives here, in the raw log, so without this a listing
-      // reassigned multiple times would only ever show the latest hop,
-      // silently hiding the rest of the chain. Same reasoning as the
-      // "downloaded" case: matters specifically once something clears/
-      // overwrites the flat field, since the raw log entry survives that.
+      // column exists for either), plus any "downloaded" log entries that
+      // AREN'T the current downloadedAt (which is already shown via the
+      // flat-field row above). That second part matters specifically once
+      // a reopen clears downloadedAt: the flat-field row disappears, but
+      // the original download was still real and stays in the log —
+      // without this it would silently vanish from the visible timeline.
       const rawLogEvents = (Array.isArray(entry && entry.history) ? entry.history : [])
         .filter(e => e && (
           e.type === "recategorized" ||
           e.type === "downloaded_cleared" ||
-          (e.type === "downloaded"  && e.ts !== (entry && entry.downloadedAt)) ||
-          (e.type === "reassigned"  && e.ts !== (entry && entry.reassignedAt)) ||
-          (e.type === "assigned"    && e.ts !== (entry && entry.assignedAt))
+          (e.type === "downloaded" && e.ts !== (entry && entry.downloadedAt))
         ))
         .map(e => {
           if (e.type === "recategorized") {
@@ -2617,24 +2561,6 @@
             return {
               label: "Download Cleared", color: "#9ca3af", dot: "downloaded_cleared", ts: e.ts,
               detail: e.reason || null,
-            };
-          }
-          if (e.type === "reassigned") {
-            return {
-              label: "Reassigned", color: "#f472b6", dot: "reassigned", ts: e.ts,
-              detail: [
-                e.from && e.to ? `${e.from} \u2192 ${e.to}` : null,
-                e.by ? `By: ${e.by}` : null,
-              ].filter(Boolean).join("  \u00b7  ") || null,
-            };
-          }
-          if (e.type === "assigned") {
-            return {
-              label: "Assigned", color: "#e6941a", dot: "assigned", ts: e.ts,
-              detail: [
-                e.editor ? `To: ${e.editor}` : null,
-                e.by ? `By: ${e.by}` : null,
-              ].filter(Boolean).join("  \u00b7  ") || null,
             };
           }
           return {
