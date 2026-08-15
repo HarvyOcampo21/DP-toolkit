@@ -158,6 +158,7 @@
           reassignedAt: match.reassignedAt || "", bedrooms: match.bedrooms || "",
           crmStatus: match.crmStatus || "", downloadedAt: match.downloadedAt || "",
           history: Array.isArray(match.history) ? match.history : [],
+          listingRef: match.listingRef || "",
         };
         if (match.downloaded) downloadedCache[ref] = true; else delete downloadedCache[ref];
         lastLocalChangeAt[ref] = Date.now();
@@ -375,9 +376,16 @@
     const el = row.querySelector(".title-text");
     return el ? el.textContent.trim() : "";
   }
+  // Matches the CRM's listing-reference badge (e.g. "DP-S-49080") — kept
+  // strict against a known prefix list rather than accepting any text in a
+  // ".badge.ref" element, since that class combo isn't guaranteed unique to
+  // this one badge across every CRM page layout. A stray unrelated match
+  // here would otherwise silently pollute the persisted ListingRef field.
+  const LISTING_REF_PATTERN = /^(?:DPA-[SR]-|DP-[SR]-|CBB-[SR]-|[SR]-)\d+/i;
   function extractReferenceCode(row) {
     const el = row.querySelector(".badge.ref");
-    return el ? el.textContent.trim() : null;
+    const text = el ? el.textContent.trim() : "";
+    return text && LISTING_REF_PATTERN.test(text) ? text : null;
   }
   // Some CRM status values are just an "approved" follow-on state of one
   // of our tracked categories, not a genuinely different category — e.g.
@@ -1071,7 +1079,7 @@
   // to this write-once rule.
   // Fire-and-forget: failures here shouldn't interrupt the page, and the
   // dashboard falls back to live DOM data whenever the sheet has nothing.
-  function syncMetaIfNeeded(ref, bedBucket, crmStatus, title) {
+  function syncMetaIfNeeded(ref, bedBucket, crmStatus, title, listingRef) {
     if (!ref) return;
     const entry = assignmentCache[ref];
     // Track metadata for anything the sheet already has a row for — assigned
@@ -1081,13 +1089,17 @@
     const bedVal = bedBucket === undefined || bedBucket === null ? "" : bedBucket;
     const alreadyCategorized = entry.crmStatus && CATEGORY_OPTIONS.includes(entry.crmStatus);
     const categoryVal = !alreadyCategorized && CATEGORY_OPTIONS.includes(crmStatus) ? crmStatus : "";
-    if (!bedVal && !categoryVal) return;
-    const key = bedVal + "|" + categoryVal;
+    // ListingRef only needs sending if it's not already what's on file —
+    // once correct, it shouldn't keep re-sending on every poll pass forever.
+    const refVal = (listingRef && listingRef !== entry.listingRef) ? listingRef : "";
+    if (!bedVal && !categoryVal && !refVal) return;
+    const key = bedVal + "|" + categoryVal + "|" + refVal;
     if (metaSyncCache[ref] === key) return; // nothing changed since last sync
     metaSyncCache[ref] = key;
     chrome.runtime.sendMessage({
       type: "DP_SYNC_META", ref, editor: entry.editor || "", status: entry.status || "",
       bedrooms: bedVal, crmStatus: categoryVal, title: title || entry.title || "",
+      listingRef: refVal,
     }, resp => {
       if (chrome.runtime.lastError || !resp || !resp.ok) metaSyncCache[ref] = ""; // allow retry on next pass
     });
@@ -1152,7 +1164,7 @@
       if (crmStatus) row.dataset.dpCrmStatus = crmStatus;
       else delete row.dataset.dpCrmStatus;
 
-      syncMetaIfNeeded(ref, bucket, crmStatus, extractTitle(row));
+      syncMetaIfNeeded(ref, bucket, crmStatus, extractTitle(row), extractReferenceCode(row));
       maybeReopenOnRecategorize(ref, crmStatus, extractTitle(row));
 
       const inner = row.querySelector(".table-row-inner.is-dropdown");
@@ -1482,6 +1494,7 @@
             reassignedAt:   a.reassignedAt   || "",
             unassignedAt:   a.unassignedAt   || "",
             history:        Array.isArray(a.history) ? a.history : [],
+            listingRef:     a.listingRef     || "",
           };
           if (a.downloaded) freshDownloaded[a.ref] = true;
         });
@@ -2691,6 +2704,7 @@
           crmStatus:      match.crmStatus       || "",
           downloadedAt:   match.downloadedAt    || "",
           history:        Array.isArray(match.history) ? match.history : [],
+          listingRef:     match.listingRef      || "",
         };
       }
       renderTimeline(match || null);

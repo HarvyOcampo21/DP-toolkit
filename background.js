@@ -374,7 +374,8 @@ function dispatchAssignerMessage(message, sendResponse) {
   if (message.type === "DP_SYNC_META") {
     postToAssignerSheet({ action: "syncMeta", ref: message.ref, editor: message.editor || "",
       status: message.status || "", bedrooms: message.bedrooms || "",
-      crmStatus: message.crmStatus || "", title: message.title || "" }, sendResponse);
+      crmStatus: message.crmStatus || "", title: message.title || "",
+      listingRef: message.listingRef || "" }, sendResponse);
     return true;
   }
 
