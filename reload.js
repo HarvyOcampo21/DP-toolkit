@@ -84,6 +84,9 @@ const CHANGELOG = [
       { version: 47, notes: [
     "Added a \u201cMonth\u201d filter to the Assignment board \u2014 shows everything assigned so far this month, right alongside Today, This Week, and Last 7 Days.",
   ]},
+      { version: 48, notes: [
+    "Each listing's reference number (e.g. DP-S-49080, DP-R-65511) is now captured and saved alongside its assignment \u2014 separate from the internal request number, so it's available even when the listing isn't open on screen.",
+  ]},
 ];
 
 const card = document.getElementById("card");
