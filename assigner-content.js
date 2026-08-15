@@ -1556,6 +1556,7 @@
     return addDays(startOfLocalDay(d), -((day + 6) % 7));
   }
   function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+  function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 
   // Turns a scope descriptor into a [start, end) local-time range, or null
   // for "all" (no filtering).
@@ -1586,6 +1587,15 @@
       // Jul 26 range. Clicking it again next week resolves to Jul 27 – Aug 2.
       const monday = startOfWeekMonday(now);
       return [monday, addDays(monday, 7)];
+    }
+    if (scope === "month") {
+      // 1st of the current month through the end of TODAY, not the whole
+      // month — e.g. on Aug 13 this is Aug 1–13, and on Aug 14 (no code
+      // change needed) it's automatically Aug 1–14, since both ends are
+      // computed fresh from "now" every time this runs rather than being
+      // a fixed range someone has to update.
+      const start = startOfMonth(now);
+      return [start, addDays(startOfLocalDay(now), 1)];
     }
     if (scope && scope.type === "custom") {
       if (!scope.start || !scope.end) return null;
@@ -2200,6 +2210,9 @@
     const weekBtn = Object.assign(document.createElement("button"), {
       type: "button", className: "dp-sort-btn", textContent: "Last 7 Days"
     });
+    const monthBtn = Object.assign(document.createElement("button"), {
+      type: "button", className: "dp-sort-btn", textContent: "Month"
+    });
     const allBtn = Object.assign(document.createElement("button"), {
       type: "button", className: "dp-sort-btn", textContent: "All time"
     });
@@ -2210,6 +2223,7 @@
     scopeRow.appendChild(yesterdayBtn);
     scopeRow.appendChild(thisWeekBtn);
     scopeRow.appendChild(weekBtn);
+    scopeRow.appendChild(monthBtn);
     scopeRow.appendChild(allBtn);
     scopeRow.appendChild(customBtn);
     modal.appendChild(scopeRow);
@@ -2320,6 +2334,7 @@
       if (s === "yesterday") return "assigned yesterday";
       if (s === "thisWeek") return "assigned this week (Mon–Sun)";
       if (s === "week") return "assigned in the last 7 days";
+      if (s === "month") return "assigned this month (month-to-date)";
       if (s === "all") return "assigned (all time)";
       if (s && s.type === "custom") return `assigned from ${s.start} to ${s.end}`;
       return "assigned";
@@ -2330,6 +2345,7 @@
       if (s === "yesterday") return `No listings assigned or put on hold yesterday ${suffix}`;
       if (s === "thisWeek") return `No listings assigned or put on hold this week ${suffix}`;
       if (s === "week") return `No listings assigned or put on hold in the last 7 days ${suffix}`;
+      if (s === "month") return `No listings assigned or put on hold this month (month-to-date) ${suffix}`;
       if (s === "all") return `No assigned or on-hold listings found ${suffix}`;
       if (s && s.type === "custom") return `No listings assigned or put on hold in that date range ${suffix}`;
       return `No listings found ${suffix}`;
@@ -2340,6 +2356,7 @@
       yesterdayBtn.classList.toggle("is-active", scope === "yesterday");
       weekBtn.classList.toggle("is-active", scope === "week");
       thisWeekBtn.classList.toggle("is-active", scope === "thisWeek");
+      monthBtn.classList.toggle("is-active", scope === "month");
       allBtn.classList.toggle("is-active", scope === "all");
       customBtn.classList.toggle("is-active", scope && scope.type === "custom");
 
@@ -2410,6 +2427,7 @@
     yesterdayBtn.addEventListener("click", () => selectScope("yesterday"));
     weekBtn.addEventListener("click", () => selectScope("week"));
     thisWeekBtn.addEventListener("click", () => selectScope("thisWeek"));
+    monthBtn.addEventListener("click", () => selectScope("month"));
     allBtn.addEventListener("click", () => selectScope("all"));
     customBtn.addEventListener("click", () => {
       startInput.value = customDraft.start;

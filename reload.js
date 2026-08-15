@@ -81,6 +81,9 @@ const CHANGELOG = [
     { version: 44, notes: [
     "Backend split for speed — Assignment data now runs on its own dedicated server, so it won't slow down or get slowed down by other activity",
   ]},
+      { version: 47, notes: [
+    "Added a \u201cMonth\u201d filter to the Assignment board \u2014 shows everything assigned so far this month, right alongside Today, This Week, and Last 7 Days.",
+  ]},
 ];
 
 const card = document.getElementById("card");
