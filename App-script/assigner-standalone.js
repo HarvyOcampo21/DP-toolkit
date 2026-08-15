@@ -20,17 +20,6 @@ const ASSIGNER_TOKEN = "DPPE"; // unchanged — extension/dashboard don't need u
 const ASSIGNER_SHEET_NAME = "Assignments";
 const ASSIGNER_ARCHIVE_SHEET_NAME = "Assignments Archive";
 const ASSIGNER_TRACKED_CATEGORIES = ["Offplan Pending", "Photos For QC", "Stock Photos For QC", "Upload Pending", "Re-shoot"];
-// Raw CRM badge strings that are "approved" follow-on states of a tracked
-// category rather than genuinely new work — see CRM_STATUS_ALIASES on the
-// client (assigner-content.js) for where these get normalized for display/
-// category-tracking purposes. Kept here too because reopenOnCategoryChange
-// needs the *un-normalized* value to tell a real resubmission apart from a
-// same-category re-poll (see that function for why).
-const ASSIGNER_APPROVED_ALIASES = ["QC Approved", "Stock Photos QC Approved"];
-const ASSIGNER_APPROVED_ALIAS_LOWER = ASSIGNER_APPROVED_ALIASES.map(s => s.toLowerCase());
-function isApprovedAlias(raw) {
-  return !!raw && ASSIGNER_APPROVED_ALIAS_LOWER.indexOf(String(raw).toLowerCase()) > -1;
-}
 const ASSIGNER_HEADERS = [
   "Ref","Title","Editor","Status",
   "AssignedAt","UpdatedAt","Downloaded","DownloadedAt",
@@ -38,7 +27,8 @@ const ASSIGNER_HEADERS = [
   "AssignedBy",
   "ReassignedFrom","ReassignedTo","ReassignedBy","ReassignedAt",
   "Bedrooms","Category","UnassignedAt",
-  "History","RawStatus"
+  "History",
+  "ListingRef"
 ];
 const ASSIGNER_COL = {
   REF:1,TITLE:2,EDITOR:3,STATUS:4,
@@ -47,7 +37,8 @@ const ASSIGNER_COL = {
   ASSIGNED_BY:14,
   REASSIGNED_FROM:15,REASSIGNED_TO:16,REASSIGNED_BY:17,REASSIGNED_AT:18,
   BEDROOMS:19,CRM_STATUS:20,UNASSIGNED_AT:21,
-  HISTORY:22,RAW_STATUS:23
+  HISTORY:22,
+  LISTING_REF:23
 };
 
 // Archiving cutoff — Completed/Rejected rows whose UpdatedAt is older than
@@ -183,7 +174,7 @@ function getAssignerAssignments(token) {
     crmStatus:       r[19] || "",
     unassignedAt:    fmt(r[20]),
     history:         parseHistory(r[21]),
-    rawStatus:       r[22] || "",
+    listingRef:      r[22] || "",
   }))});
 
   return ContentService
@@ -243,7 +234,7 @@ function assignerDoPost_impl(p) {
       overrides.crmStatus      !== undefined ? overrides.crmStatus      : ex(ASSIGNER_COL.CRM_STATUS),
       overrides.unassignedAt   !== undefined ? overrides.unassignedAt   : ex(ASSIGNER_COL.UNASSIGNED_AT),
       overrides.history        !== undefined ? overrides.history        : ex(ASSIGNER_COL.HISTORY),
-      overrides.rawStatus      !== undefined ? overrides.rawStatus      : ex(ASSIGNER_COL.RAW_STATUS),
+      overrides.listingRef     !== undefined ? overrides.listingRef     : ex(ASSIGNER_COL.LISTING_REF),
     ];
   }
 
@@ -261,49 +252,51 @@ function assignerDoPost_impl(p) {
   }
 
   // ── syncMeta ──────────────────────────────────────────────────────────
-  // Passively persists bedroom count + task category (both otherwise only
-  // known from the CRM page's DOM) so the Dashboard can read them back
-  // without depending on the listing still being loaded on screen.
-  // Category is write-once: once set, it's never overwritten.
+  // Passively persists bedroom count + task category + listing reference
+  // (the DP-S-/DP-R-/etc. reference badge, distinct from Ref which is the
+  // internal DP-REQ photo-request number) — all otherwise only known from
+  // the CRM page's DOM — so the Dashboard can read them back without
+  // depending on the listing still being loaded on screen.
+  // Category is write-once: once set, it's never overwritten. ListingRef
+  // and Bedrooms are NOT write-once — a listing's physical reference number
+  // and bedroom count shouldn't normally change, but if the CRM is ever
+  // corrected, overwriting keeps this in sync rather than freezing on a
+  // stale first-seen value forever.
   //
   // Real no-op short-circuit: the content script's own dedupe cache lives
   // per-tab and resets on every page reload / new tab, so in practice this
   // fires far more often than the data actually changes — every open CRM
   // tab re-confirms metadata on every poll pass regardless. Rather than
   // trust the client to only call this on real changes, the server checks
-  // for itself: if bedrooms/category/title would all resolve to the exact
-  // same values already on file, skip the write (and the UpdatedAt bump)
-  // entirely rather than paying for a no-op setValues + lock hold. This is
-  // what keeps write volume down (and UpdatedAt meaningful) regardless of
-  // how many tabs are open or how often they poll.
+  // for itself: if bedrooms/category/title/listingRef would all resolve to
+  // the exact same values already on file, skip the write (and the
+  // UpdatedAt bump) entirely rather than paying for a no-op setValues +
+  // lock hold. This is what keeps write volume down (and UpdatedAt
+  // meaningful) regardless of how many tabs are open or how often they poll.
   if (p.action === "syncMeta") {
-    const bedrooms  = p.bedrooms  !== undefined && p.bedrooms  !== null ? String(p.bedrooms)  : "";
-    const crmStatus = ASSIGNER_TRACKED_CATEGORIES.indexOf(p.crmStatus) > -1 ? p.crmStatus : "";
-    // Unlike Category (write-once, above), RawStatus reflects whatever the
-    // CRM's badge literally says right now — it's overwritten on every poll
-    // so reopenOnCategoryChange always has an accurate "what did we see last
-    // time" to compare against, even across page reloads/tab closes.
-    const rawStatus = p.rawStatus || "";
-    const title     = p.title || "";
+    const bedrooms   = p.bedrooms   !== undefined && p.bedrooms   !== null ? String(p.bedrooms)   : "";
+    const crmStatus  = ASSIGNER_TRACKED_CATEGORIES.indexOf(p.crmStatus) > -1 ? p.crmStatus : "";
+    const title      = p.title || "";
+    const listingRef = (p.listingRef || "").trim();
     if (ri > -1) {
-      const bedroomsChanged = !!bedrooms && bedrooms !== String(ex(ASSIGNER_COL.BEDROOMS) || "");
-      const categoryChanged = !!crmStatus && !ex(ASSIGNER_COL.CRM_STATUS); // write-once
-      const titleChanged    = !!title && title !== ex(ASSIGNER_COL.TITLE);
-      const rawStatusChanged = !!rawStatus && rawStatus !== ex(ASSIGNER_COL.RAW_STATUS);
+      const bedroomsChanged   = !!bedrooms   && bedrooms   !== String(ex(ASSIGNER_COL.BEDROOMS) || "");
+      const categoryChanged   = !!crmStatus  && !ex(ASSIGNER_COL.CRM_STATUS); // write-once
+      const titleChanged      = !!title      && title      !== ex(ASSIGNER_COL.TITLE);
+      const listingRefChanged = !!listingRef && listingRef !== String(ex(ASSIGNER_COL.LISTING_REF) || "");
 
-      if (!bedroomsChanged && !categoryChanged && !titleChanged && !rawStatusChanged) {
+      if (!bedroomsChanged && !categoryChanged && !titleChanged && !listingRefChanged) {
         return jsonResponse({ ref: p.ref, synced: true, skipped: true });
       }
 
       const overrides = { updatedAt: now };
       if (bedroomsChanged) overrides.bedrooms = bedrooms;
       if (categoryChanged) overrides.crmStatus = crmStatus;
+      if (listingRefChanged) overrides.listingRef = listingRef;
       if (titleChanged) overrides.title = title;
-      if (rawStatusChanged) overrides.rawStatus = rawStatus;
       sheet.getRange(ri, 1, 1, ASSIGNER_HEADERS.length).setValues([fullRow(overrides)]);
     } else if (p.editor || p.status) {
       sheet.appendRow(fullRow({ ref: p.ref, title, editor: p.editor || "",
-        status: p.status || (p.editor ? "Assigned" : ""), updatedAt: now, bedrooms, crmStatus, rawStatus }));
+        status: p.status || (p.editor ? "Assigned" : ""), updatedAt: now, bedrooms, crmStatus, listingRef }));
     }
     return jsonResponse({ ref: p.ref, synced: true });
   }
@@ -416,51 +409,14 @@ function assignerDoPost_impl(p) {
   }
 
   // ── reopenOnCategoryChange ──────────────────────────────────────────────
-  // "Changed" is NOT simply "newCategory !== the Category already on file".
-  // Category is write-once (see syncMeta above): it's locked to whatever
-  // task category the listing FIRST appeared under, and CRM_STATUS_ALIASES
-  // on the client folds "QC Approved" back down to "Photos For QC" (same
-  // for the Stock Photos variant) so it counts as that same tracked
-  // category everywhere else. That's the right call almost everywhere —
-  // but it means a listing that gets Rejected, has the CRM auto-approve the
-  // (rejected) photos it already has, and THEN gets genuinely new photos
-  // from a reshoot lands back on the exact same category string it started
-  // with ("Photos For QC" -> "QC Approved" -> "Photos For QC"), which is
-  // indistinguishable from "nothing happened, this is just a re-poll" if
-  // Category alone is the yardstick.
-  //
-  // RawStatus (also above, but updated every poll rather than write-once)
-  // is what actually resolves that: a real resubmission is specifically the
-  // transition OUT of one of the Approved aliases back into a tracked base
-  // category, and that's a strictly stronger, distinguishable signal than
-  // comparing category strings. A direct jump to a different tracked
-  // category entirely (e.g. Photos For QC -> Upload Pending, no Approved
-  // detour) is still caught the simple way, via the Category comparison.
   if (p.action === "reopenOnCategoryChange") {
     const newCategory = ASSIGNER_TRACKED_CATEGORIES.indexOf(p.newCategory) > -1 ? p.newCategory : "";
     if (ri === -1 || !newCategory) return jsonResponse({ ref: p.ref, reopened: false });
 
     const prevStatus   = ex(ASSIGNER_COL.STATUS);
     const prevCategory = ex(ASSIGNER_COL.CRM_STATUS);
-    const prevRawStatus = ex(ASSIGNER_COL.RAW_STATUS);
-    const rawStatus      = p.rawStatus || p.newCategory || "";
     const reopenableFrom = prevStatus === "Rejected" || prevStatus === "Completed";
-
-    const directCategoryChange = newCategory !== prevCategory;
-    // Same category as before, but we can see it round-tripped through an
-    // Approved alias in between — that's real new work even though the
-    // category string never moved.
-    const resubmittedThroughApproval = !directCategoryChange
-      && isApprovedAlias(prevRawStatus) && !isApprovedAlias(rawStatus);
-
-    if (!reopenableFrom || !(directCategoryChange || resubmittedThroughApproval)) {
-      // Still worth recording the raw status even when we're not reopening
-      // (e.g. this poll is the "-> QC Approved" half of the round trip) —
-      // otherwise the NEXT poll, which is the one that actually matters,
-      // would have nothing to compare against.
-      if (rawStatus && rawStatus !== prevRawStatus) {
-        sheet.getRange(ri, 1, 1, ASSIGNER_HEADERS.length).setValues([fullRow({ updatedAt: now, rawStatus })]);
-      }
+    if (!reopenableFrom || newCategory === prevCategory) {
       return jsonResponse({ ref: p.ref, reopened: false });
     }
 
@@ -471,7 +427,6 @@ function assignerDoPost_impl(p) {
     historyJson = appendHistory(historyJson, {
       type: "recategorized", ts: now.toISOString(),
       from: prevCategory || "(uncategorized)", to: newCategory,
-      viaApproval: resubmittedThroughApproval || undefined,
     });
     if (wasDownloaded) {
       historyJson = appendHistory(historyJson, {
@@ -481,14 +436,12 @@ function assignerDoPost_impl(p) {
     }
     historyJson = appendHistory(historyJson, {
       type: "unassigned", ts: now.toISOString(), editor: prevEditor,
-      reason: resubmittedThroughApproval
-        ? "Auto-reopened — new " + newCategory + " submission detected after " + prevStatus.toLowerCase() + " photos were approved"
-        : "Auto-reopened — category advanced to " + newCategory + " after " + prevStatus.toLowerCase(),
+      reason: "Auto-reopened — category advanced to " + newCategory + " after " + prevStatus.toLowerCase(),
     });
 
     sheet.getRange(ri, 1, 1, ASSIGNER_HEADERS.length).setValues([fullRow({
       editor: "", status: "Unassigned", updatedAt: now, unassignedAt: now,
-      crmStatus: newCategory, rawStatus, title: p.title || ex(ASSIGNER_COL.TITLE),
+      crmStatus: newCategory, title: p.title || ex(ASSIGNER_COL.TITLE),
       downloaded: false, downloadedAt: "",
       history: historyJson,
     })]);
@@ -502,8 +455,7 @@ function assignerDoPost_impl(p) {
   const prevEditor = ex(ASSIGNER_COL.EDITOR);
   const prevStatus = ex(ASSIGNER_COL.STATUS);
   const isReAssign = !!(ri > -1 && prevEditor && prevEditor !== editor);
-  const isFreshStart = prevStatus === "Unassigned";
-  const shouldResetStarted = isFreshStart || isReAssign;
+  const isFreshStart = isReAssign || prevStatus === "Unassigned";
   const newAssignedAt = isFreshStart ? now : (ex(ASSIGNER_COL.ASSIGNED_AT) || now);
   const crmStatusOverride = ASSIGNER_TRACKED_CATEGORIES.indexOf(p.crmStatus) > -1 ? p.crmStatus : "";
 
@@ -525,7 +477,7 @@ function assignerDoPost_impl(p) {
       status:          "Assigned",
       assignedAt:      newAssignedAt,
       updatedAt:       now,
-      startedAt:       shouldResetStarted ? "" : ex(ASSIGNER_COL.STARTED_AT),
+      startedAt:       isFreshStart ? "" : ex(ASSIGNER_COL.STARTED_AT),
       onHoldAt:        "",
       onHoldReason:    "",
       assignedBy:      isFreshStart ? actionBy : (ex(ASSIGNER_COL.ASSIGNED_BY) || actionBy),
