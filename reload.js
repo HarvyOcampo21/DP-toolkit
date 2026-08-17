@@ -91,6 +91,10 @@ const CHANGELOG = [
     "Fixed rejected/completed listings not reopening for reassignment when the CRM's status came back to the SAME category as before (e.g. Photos For QC \u2192 rejected \u2192 Photos For QC again) \u2014 this now works the same as when it comes back under a different category.",
     "Each rework cycle is now tracked as its own entry, so completed/rejected counts stay accurate no matter how many times a listing gets reshot \u2014 and Time History now shows the full story across every cycle, start to finish.",
   ]},
+      { version: 50, notes: [
+    "Added Auto-Assign \u2014 new listings can now be assigned automatically to whoever's had the fewest tasks today, keeping everyone's workload even without anyone having to think about it. Runs 9am\u20135:30pm; toggle it on/off anytime from the Dashboard.",
+    "When Auto-Assign is off (or outside its hours), you'll now see a \u201cSuggested\u201d name next to unassigned listings \u2014 the same fair pick, just left for a senior to confirm by hand.",
+  ]},
 ];
 
 const card = document.getElementById("card");

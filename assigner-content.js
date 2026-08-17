@@ -56,6 +56,11 @@
   // what buys the headroom to poll this tight in the first place.
   const REFRESH_INTERVAL_MS = 3000;
   const BACKGROUND_REFRESH_INTERVAL_MS = 15000;
+  // Deliberately much slower than the board poll — the fairness picker's
+  // suggestion changes only when someone actually gets assigned a new
+  // task, not every few seconds, and it doesn't need to compete with the
+  // board's real-time refresh for attention/quota.
+  const RECOMMENDATION_REFRESH_MS = 60000;
   const BURST_WINDOW_MS = 2000;
   const BURST_THRESHOLD = 25;
   const BURST_DEBOUNCE_MS = 800;
@@ -64,6 +69,13 @@
   let downloadedCache = {};
   let lastLocalChangeAt = {};
   let refreshInFlight = false;
+  // Fairness picker's current suggestion — a single shared value, not
+  // per-listing, since the picker's answer ("who's least busy right now")
+  // is the same regardless of which unassigned row is asking. Refreshed on
+  // its own slower interval (see refreshRecommendation below), independent
+  // of the fast board poll — this doesn't need to be second-fresh, it's a
+  // suggestion, not a source of truth.
+  let recommendedEditor = null;
   let selectedBedroomFilters = new Set();
   let selectedEditorFilters = new Set();
   let selectedStatusFilters = new Set();
@@ -709,6 +721,20 @@
           showOnHoldModal("", "edit", reason => setOnHold(reason));
         });
         widget.appendChild(holdBtn);
+
+        // Fairness-picker suggestion — read-only hint, not a control. Shown
+        // whenever a recommendation is available, regardless of whether
+        // auto-assign itself is currently on/off/in-window — a senior
+        // assigning by hand should see the same fairness-based suggestion
+        // either way.
+        if (recommendedEditor) {
+          const suggestion = document.createElement("span");
+          suggestion.className = "dp-suggested-editor";
+          suggestion.textContent = "Suggested: " + recommendedEditor;
+          suggestion.style.cssText = "font-size:11px;color:#6b7280;margin-left:6px;white-space:nowrap;";
+          suggestion.title = "Fairness pick — click Assign to choose, this name will be highlighted in the list";
+          widget.appendChild(suggestion);
+        }
       } else {
         const dash = document.createElement("span");
         dash.className = "dp-unassigned-pill";
@@ -809,11 +835,23 @@
           opt.type = "button";
           opt.className = "dp-editor-option";
           opt.textContent = name;
+          opt.dataset.dpEditorName = name;
           opt.addEventListener("click", e => { e.stopPropagation(); assign(name); pop.classList.remove("is-open"); });
           pop.appendChild(opt);
         });
         widget.appendChild(pop);
       }
+      // Re-applied on every open (not gated behind the `if (!pop)` creation
+      // above) so this always reflects the current fairness suggestion —
+      // the popover's DOM structure persists across opens once built, but
+      // recommendedEditor keeps refreshing independently in the background,
+      // so this can't just be set once at creation time without going stale.
+      pop.querySelectorAll(".dp-editor-option").forEach(opt => {
+        const isRecommended = !!recommendedEditor && opt.dataset.dpEditorName === recommendedEditor;
+        opt.style.fontWeight = isRecommended ? "700" : "";
+        opt.style.color = isRecommended ? "#00d1b2" : "";
+        opt.title = isRecommended ? "Fairness pick — currently least busy today" : "";
+      });
       pop.classList.add("is-open");
     }
 
@@ -3136,7 +3174,27 @@
     startPolling();
     document.addEventListener("visibilitychange", guarded(startPolling));
     debounceProcess();
+
+    // Independent, slow interval — the fairness picker's suggestion doesn't
+    // need to be second-fresh like the board itself, and keeping it off the
+    // fast 3s/15s poll cadence means this never adds meaningful extra load.
+    refreshRecommendation();
+    setInterval(guarded(refreshRecommendation), RECOMMENDATION_REFRESH_MS);
   });
+
+  // Read-only — fetches who the fairness picker would currently suggest.
+  // A single shared answer reused across every Unassigned row on the page
+  // (see recommendedEditor's declaration for why this doesn't need to be
+  // per-listing). Failures are silent and simply leave the previous
+  // suggestion in place — a stale or missing suggestion is a cosmetic
+  // non-issue, never worth surfacing an error for.
+  function refreshRecommendation() {
+    safeSendMessage({ type: "DP_GET_RECOMMENDATION" }, resp => {
+      if (resp && resp.ok && resp.data && resp.data.recommended) {
+        recommendedEditor = resp.data.recommended;
+      }
+    });
+  }
 
   // Restarts the poll loop at the rate matching current tab visibility.
   // Called on init and again every time visibility changes, so a
