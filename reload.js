@@ -95,6 +95,9 @@ const CHANGELOG = [
     "Added Auto-Assign \u2014 new listings can now be assigned automatically to whoever's had the fewest tasks today, keeping everyone's workload even without anyone having to think about it. Runs 9am\u20135:30pm; toggle it on/off anytime from the Dashboard.",
     "When Auto-Assign is off (or outside its hours), you'll now see a \u201cSuggested\u201d name next to unassigned listings \u2014 the same fair pick, just left for a senior to confirm by hand.",
   ]},
+      { version: 51, notes: [
+    "The Auto-Assign on/off switch now also lives right in the filter bar (seniors only), next to Bedrooms/Sort/Editor/Status \u2014 no need to open the separate Dashboard just to check or flip it.",
+  ]},
 ];
 
 const card = document.getElementById("card");
