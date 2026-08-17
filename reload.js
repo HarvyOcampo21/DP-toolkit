@@ -87,6 +87,10 @@ const CHANGELOG = [
       { version: 48, notes: [
     "Each listing's reference number (e.g. DP-S-49080, DP-R-65511) is now captured and saved alongside its assignment \u2014 separate from the internal request number, so it's available even when the listing isn't open on screen.",
   ]},
+      { version: 49, notes: [
+    "Fixed rejected/completed listings not reopening for reassignment when the CRM's status came back to the SAME category as before (e.g. Photos For QC \u2192 rejected \u2192 Photos For QC again) \u2014 this now works the same as when it comes back under a different category.",
+    "Each rework cycle is now tracked as its own entry, so completed/rejected counts stay accurate no matter how many times a listing gets reshot \u2014 and Time History now shows the full story across every cycle, start to finish.",
+  ]},
 ];
 
 const card = document.getElementById("card");

@@ -139,8 +139,15 @@
       : m => m.status === expectedStatusOrPredicate;
 
     safeSendMessage({ type: "DP_GET_ALL" }, verifyResp => {
+      // .filter().pop() rather than .find() — a Ref can now have more than
+      // one row (see reopenOnCategoryChange server-side), and rows are
+      // always appended after the ones they follow, so the last match is
+      // always the current cycle. .find() would silently grab whichever
+      // occurrence came first — an old Rejected/Completed row from a prior
+      // cycle — and this verification check would then compare against the
+      // wrong row's status entirely.
       const match = verifyResp && verifyResp.ok && verifyResp.data && Array.isArray(verifyResp.data.assignments)
-        ? verifyResp.data.assignments.find(a => a.ref === ref)
+        ? verifyResp.data.assignments.filter(a => a.ref === ref).pop()
         : null;
 
       if (match && matches(match)) {
@@ -2683,7 +2690,10 @@
         return;
       }
 
-      const match = resp.data.assignments.find(a => a.ref === ref);
+      // Last match, not first — same reasoning as the write-verification
+      // fix above: the current cycle's row is always the last one appended
+      // for a given Ref.
+      const match = resp.data.assignments.filter(a => a.ref === ref).pop();
       if (match && ref) {
         assignmentCache[ref] = {
           editor:         match.editor         || "",
