@@ -76,16 +76,6 @@
   // of the fast board poll — this doesn't need to be second-fresh, it's a
   // suggestion, not a source of truth.
   let recommendedEditor = null;
-  // Auto-assign toggle/status state for the filter-bar control. loaded
-  // starts false so the toggle can show a neutral state before the first
-  // fetch resolves, rather than defaulting to a specific on/off guess.
-  let autoAssignStatus = { enabled: false, withinWindow: false, active: false, loaded: false };
-  // DOM refs kept so refreshAutoAssignStatus can update the toggle/status
-  // display directly, without needing to rebuild the whole filter bar
-  // (ensureFilterBar only ever runs once per page load).
-  let autoAssignToggleInput = null;
-  let autoAssignStatusDot = null;
-  let autoAssignStatusText = null;
   let selectedBedroomFilters = new Set();
   let selectedEditorFilters = new Set();
   let selectedStatusFilters = new Set();
@@ -1177,14 +1167,7 @@
     const entry = assignmentCache[ref];
     if (!entry || (entry.status !== "Rejected" && entry.status !== "Completed")) return;
     if (!CATEGORY_OPTIONS.includes(liveCrmStatus)) return;
-    // NOTE: deliberately no "liveCrmStatus === entry.crmStatus" check here.
-    // A rejection/rework cycle that comes back under the SAME category
-    // (e.g. Photos For QC → rejected → Approved → Photos For QC again) is
-    // just as genuine a new task as one that comes back under a different
-    // category — the server side already treats it that way (see
-    // reopenOnCategoryChange's comments). An equality check here would
-    // silently block the request from ever being SENT in the first place
-    // for that exact case, regardless of what the server would have done.
+    if (liveCrmStatus === entry.crmStatus) return; // nothing's actually changed
 
     const key = "reopen:" + liveCrmStatus;
     if (metaSyncCache[ref] === key) return; // already attempted this exact transition
@@ -1202,20 +1185,7 @@
         // optimistic update here uses, so a stale poll can't clobber it.
         // downloadedAt/downloadedCache cleared too, matching the backend
         // reset — whatever was downloaded belongs to the old shoot.
-        //
-        // Respects the server's actual auto-assign result rather than
-        // always assuming Unassigned — if Auto-Assign was on and picked
-        // someone, resp.data.autoAssigned/editor reflect that, and showing
-        // "Unassigned" here for even a moment would be actively wrong, not
-        // just stale.
-        const wasAutoAssigned = !!resp.data.autoAssigned && !!resp.data.editor;
-        assignmentCache[ref] = {
-          ...entry,
-          editor: wasAutoAssigned ? resp.data.editor : "",
-          status: wasAutoAssigned ? "Assigned" : "Unassigned",
-          crmStatus: liveCrmStatus,
-          downloadedAt: "",
-        };
+        assignmentCache[ref] = { ...entry, editor: "", status: "Unassigned", crmStatus: liveCrmStatus, downloadedAt: "" };
         delete downloadedCache[ref];
         lastLocalChangeAt[ref] = Date.now();
         processRows();
@@ -1510,80 +1480,6 @@
     autoDriveLabel.appendChild(autoDriveSlider);
     autoDriveSection.appendChild(autoDriveLabel);
     bar.appendChild(autoDriveSection);
-
-    // Auto-Assign toggle — senior-only, since this controls how work gets
-    // distributed across the whole team, not a personal display preference
-    // like the toggle above it. Applies for everyone immediately (server-
-    // side flag), regardless of who flips it or which tab they're in.
-    if (ROLE === "senior") {
-      const autoAssignSection = document.createElement("div");
-      autoAssignSection.className = "dp-filter-section";
-      autoAssignSection.appendChild(Object.assign(document.createElement("span"), {
-        className: "dp-filter-label", textContent: "Auto-Assign:"
-      }));
-
-      const autoAssignLabel = document.createElement("label");
-      autoAssignLabel.className = "dp-toggle-wrap";
-      autoAssignLabel.title = "When on, new tasks are assigned automatically to whoever's had the fewest today (9am\u20135:30pm). When off, listings stay Unassigned with a Suggested name for manual pickup.";
-      const autoAssignInput = document.createElement("input");
-      autoAssignInput.type = "checkbox";
-      autoAssignInput.className = "dp-toggle-input";
-      autoAssignInput.disabled = true; // enabled once the first status fetch resolves — see refreshAutoAssignStatus
-      autoAssignInput.addEventListener("change", () => {
-        const next = autoAssignInput.checked;
-        const prev = autoAssignStatus.enabled;
-        // Optimistic — flips immediately, reverts on failure. Same pattern
-        // used everywhere else writes happen in this file.
-        autoAssignStatus.enabled = next;
-        autoAssignStatus.active = next && autoAssignStatus.withinWindow;
-        updateAutoAssignStatusUI();
-        autoAssignInput.disabled = true;
-        safeSendMessage({ type: "DP_SET_AUTO_ASSIGN_ENABLED", enabled: next }, resp => {
-          autoAssignInput.disabled = false;
-          if (!(resp && resp.ok)) {
-            console.log("DP Auto-Assign toggle failed", resp);
-            autoAssignStatus.enabled = prev;
-            autoAssignStatus.active = prev && autoAssignStatus.withinWindow;
-            updateAutoAssignStatusUI();
-          }
-        });
-      });
-      const autoAssignSlider = document.createElement("span");
-      autoAssignSlider.className = "dp-toggle-slider";
-      autoAssignLabel.appendChild(autoAssignInput);
-      autoAssignLabel.appendChild(autoAssignSlider);
-      autoAssignSection.appendChild(autoAssignLabel);
-
-      // 3-state status readout next to the switch: Active / Paused
-      // (enabled but outside 9am–5:30pm — resumes on its own) / Off.
-      const statusDot = document.createElement("span");
-      statusDot.className = "dp-autoassign-dot";
-      statusDot.style.cssText = "display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:8px;margin-right:4px;background:#6b7280;";
-      const statusText = document.createElement("span");
-      statusText.className = "dp-autoassign-statustext";
-      statusText.style.cssText = "font-size:11px;font-weight:700;color:#6b7280;white-space:nowrap;";
-      statusText.textContent = "Checking\u2026";
-      autoAssignSection.appendChild(statusDot);
-      autoAssignSection.appendChild(statusText);
-
-      autoAssignToggleInput = autoAssignInput;
-      autoAssignStatusDot = statusDot;
-      autoAssignStatusText = statusText;
-
-      // The CRM rebuilds this whole filter bar from scratch on every
-      // category-tab switch (Offplan/Agent Requests/Upload Pending/etc),
-      // which recreates these DOM nodes fresh every time — but the
-      // autoAssignStatus DATA object above survives in memory across
-      // rebuilds. Paint the already-known state immediately rather than
-      // leaving a brand-new "Checking…"/disabled node sitting there for up
-      // to a minute until the next scheduled interval tick happens to fire.
-      updateAutoAssignStatusUI();
-      // Still worth a fresh fetch too — the last known state could be
-      // meaningfully old if nobody's switched tabs in a while.
-      refreshAutoAssignStatus();
-
-      bar.appendChild(autoAssignSection);
-    }
 
     // Clear + counter + dashboard
     const toolsSection = document.createElement("div");
@@ -3283,9 +3179,7 @@
     // need to be second-fresh like the board itself, and keeping it off the
     // fast 3s/15s poll cadence means this never adds meaningful extra load.
     refreshRecommendation();
-    refreshAutoAssignStatus();
     setInterval(guarded(refreshRecommendation), RECOMMENDATION_REFRESH_MS);
-    setInterval(guarded(refreshAutoAssignStatus), RECOMMENDATION_REFRESH_MS);
   });
 
   // Read-only — fetches who the fairness picker would currently suggest.
@@ -3300,41 +3194,6 @@
         recommendedEditor = resp.data.recommended;
       }
     });
-  }
-
-  // Read-only — current Auto-Assign enabled/window/active state, for the
-  // filter bar's toggle + 3-state status text. No-op if the toggle was
-  // never rendered (junior view, or filter bar not yet built).
-  function refreshAutoAssignStatus() {
-    safeSendMessage({ type: "DP_GET_AUTO_ASSIGN_STATUS" }, resp => {
-      if (resp && resp.ok && resp.data) {
-        autoAssignStatus.enabled = !!resp.data.enabled;
-        autoAssignStatus.withinWindow = !!resp.data.withinWindow;
-        autoAssignStatus.active = !!resp.data.active;
-        autoAssignStatus.loaded = true;
-        updateAutoAssignStatusUI();
-      }
-    });
-  }
-
-  // Pushes current autoAssignStatus into the toggle/status DOM. Safe to
-  // call any time — no-ops entirely if the toggle was never rendered
-  // (junior view). Doesn't touch the checkbox's disabled state while a
-  // toggle write is in flight (that's managed by the change handler
-  // itself), so this can be called freely from the background refresh
-  // without racing an in-progress click.
-  function updateAutoAssignStatusUI() {
-    if (!autoAssignToggleInput) return;
-    autoAssignToggleInput.checked = autoAssignStatus.enabled;
-    if (autoAssignStatus.loaded) autoAssignToggleInput.disabled = false;
-
-    const color = autoAssignStatus.active ? "#00d1b2" : (autoAssignStatus.enabled ? "#e6941a" : "#6b7280");
-    const label = !autoAssignStatus.loaded ? "Checking\u2026"
-      : autoAssignStatus.active ? "Active"
-      : autoAssignStatus.enabled ? "Paused (outside 9\u20135:30)"
-      : "Off";
-    if (autoAssignStatusDot) autoAssignStatusDot.style.background = color;
-    if (autoAssignStatusText) { autoAssignStatusText.style.color = color; autoAssignStatusText.textContent = label; }
   }
 
   // Restarts the poll loop at the rate matching current tab visibility.
