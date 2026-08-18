@@ -122,15 +122,8 @@ function getArchiveSheet() {
 }
 
 function checkToken(t) { return t === ASSIGNER_TOKEN; }
-// Searches bottom-up rather than top-down — a Ref can now have more than one
-// row (see reopenOnCategoryChange, which appends a new row instead of
-// overwriting when a listing comes back for a fresh cycle), and new rows are
-// always appended after old ones. Bottom-up guarantees every write action
-// (assign, syncMeta, markCompleted, etc.) always targets the CURRENT cycle,
-// never a stale older one, without any of them needing to know duplicates
-// exist at all.
 function findRowIndex(data, ref) {
-  for (let i = data.length - 1; i >= 1; i--) if (data[i][0] === ref) return i + 1;
+  for (let i = 1; i < data.length; i++) if (data[i][0] === ref) return i + 1;
   return -1;
 }
 function isTruthyCell(v) { return v === true || v === "TRUE" || v === "true"; }
@@ -416,42 +409,6 @@ function assignerDoPost_impl(p) {
   }
 
   // ── reopenOnCategoryChange ──────────────────────────────────────────────
-  // Handles a specific real-world pattern: a listing gets Rejected or
-  // Completed while its category is one of the tracked ones, a reshoot gets
-  // booked, and eventually the CRM's own category badge advances to a
-  // tracked category again — meaning genuinely new work is now waiting.
-  //
-  // Only fires when the *current* assignment status is exactly "Rejected"
-  // or "Completed", and the newly-observed category is any tracked
-  // category — including the SAME one as before (e.g. Photos For QC →
-  // Rejected → Approved → Photos For QC again is a completely normal
-  // rejection/rework cycle, not a bug, and needs to reopen just as much as
-  // a genuine category change does). There's no risk of this firing
-  // repeatedly on every poll: the moment it fires, the newest row for this
-  // Ref flips to "Unassigned", so reopenableFrom is false on every
-  // subsequent check until someone acts on it again.
-  //
-  // Rather than overwrite the existing row in place, the old row is left
-  // completely untouched — its final Status, every timestamp, and its
-  // History all stay frozen exactly as they were the moment it was
-  // Rejected/Completed. This is what keeps historical counts (e.g. "how
-  // many Photos For QC jobs has Sudheep completed") permanently accurate
-  // even after a listing cycles through multiple rounds of rework — each
-  // cycle is its own row, counted independently.
-  //
-  // A brand-new row is appended instead: same Ref, reset to Unassigned and
-  // open for anyone to pick up, Downloaded cleared (old photos belong to
-  // the old shoot), the new Category set, and every per-cycle timestamp
-  // column (AssignedAt, StartedAt, CompletedAt, RejectedAt, OnHoldAt,
-  // AssignedBy, Reassigned*) reset to blank for the new cycle. Ref, Title,
-  // Bedrooms, and ListingRef carry forward automatically (fullRow's ex()
-  // fallback pulls them from the old row for anything not explicitly
-  // overridden here) since those describe the physical listing, not the
-  // work cycle. History is seeded with a full copy of the OLD row's
-  // History — recategorized/downloaded_cleared/unassigned events appended
-  // on top — so the new row's Time History reads as one continuous story
-  // (assigned → started → rejected → recategorized → unassigned → the next
-  // editor's assigned → ...) rather than starting from nothing.
   if (p.action === "reopenOnCategoryChange") {
     const newCategory = ASSIGNER_TRACKED_CATEGORIES.indexOf(p.newCategory) > -1 ? p.newCategory : "";
     if (ri === -1 || !newCategory) return jsonResponse({ ref: p.ref, reopened: false });
@@ -459,13 +416,13 @@ function assignerDoPost_impl(p) {
     const prevStatus   = ex(ASSIGNER_COL.STATUS);
     const prevCategory = ex(ASSIGNER_COL.CRM_STATUS);
     const reopenableFrom = prevStatus === "Rejected" || prevStatus === "Completed";
-    if (!reopenableFrom) {
+    if (!reopenableFrom || newCategory === prevCategory) {
       return jsonResponse({ ref: p.ref, reopened: false });
     }
 
     const prevEditor     = ex(ASSIGNER_COL.EDITOR);
     const wasDownloaded  = isTruthyCell(ex(ASSIGNER_COL.DOWNLOADED));
-    let historyJson = ex(ASSIGNER_COL.HISTORY); // old row's history, carried forward as the new row's starting point
+    let historyJson = ex(ASSIGNER_COL.HISTORY);
 
     historyJson = appendHistory(historyJson, {
       type: "recategorized", ts: now.toISOString(),
@@ -482,19 +439,12 @@ function assignerDoPost_impl(p) {
       reason: "Auto-reopened — category advanced to " + newCategory + " after " + prevStatus.toLowerCase(),
     });
 
-    // Append — NOT setValues on ri. The old row (still at ri) is never
-    // touched by this action; this creates a second, independent row for
-    // the same Ref.
-    sheet.appendRow(fullRow({
-      editor: "", status: "Unassigned",
-      assignedAt: "", updatedAt: now, unassignedAt: now,
-      startedAt: "", completedAt: "", rejectedAt: "",
-      onHoldAt: "", onHoldReason: "",
-      assignedBy: "", reassignedFrom: "", reassignedTo: "", reassignedBy: "", reassignedAt: "",
+    sheet.getRange(ri, 1, 1, ASSIGNER_HEADERS.length).setValues([fullRow({
+      editor: "", status: "Unassigned", updatedAt: now, unassignedAt: now,
       crmStatus: newCategory, title: p.title || ex(ASSIGNER_COL.TITLE),
       downloaded: false, downloadedAt: "",
       history: historyJson,
-    }));
+    })]);
     return jsonResponse({ ref: p.ref, reopened: true, category: newCategory });
   }
 

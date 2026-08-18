@@ -191,7 +191,6 @@ const ASSIGNER_MESSAGE_TYPES = new Set([
   "DP_MARK_COMPLETED", "DP_MARK_REJECTED", "DP_SET_ON_HOLD",
   "DP_SET_DOWNLOADED", "DP_SYNC_META", "DP_OPEN_DRIVE_SEARCH",
   "DP_REOPEN_ON_RECATEGORIZE", "DP_OPEN_LISTING_NEW_TAB",
-  "DP_GET_RECOMMENDATION", "DP_GET_AUTO_ASSIGN_STATUS", "DP_SET_AUTO_ASSIGN_ENABLED",
 ]);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -261,17 +260,6 @@ function buildAssignerGetUrl() {
   return url.toString();
 }
 
-// Shared by the two new read-only auto-assign endpoints (recommend,
-// autoAssignStatus) — same base URL/token as buildAssignerGetUrl, just with
-// an explicit action (and optional extra params) appended.
-function buildAssignerActionGetUrl(action, params) {
-  const url = new URL(ASSIGNER_CONFIG.WEB_APP_URL);
-  url.searchParams.set("token", ASSIGNER_CONFIG.TOKEN);
-  url.searchParams.set("action", action);
-  if (params) Object.keys(params).forEach(k => { if (params[k] !== undefined) url.searchParams.set(k, params[k]); });
-  return url.toString();
-}
-
 function buildDriveSearchUrl(query, workEmail) {
   const url = new URL("https://drive.google.com/drive/search");
   url.searchParams.set("q", query);
@@ -316,7 +304,7 @@ function postToAssignerSheet(body, sendResponse) {
 const ASSIGNER_WRITE_TYPES = new Set([
   "DP_ASSIGN", "DP_UNASSIGN", "DP_MARK_INPROGRESS", "DP_MARK_COMPLETED",
   "DP_MARK_REJECTED", "DP_SET_ON_HOLD", "DP_SET_DOWNLOADED", "DP_SYNC_META",
-  "DP_REOPEN_ON_RECATEGORIZE", "DP_SET_AUTO_ASSIGN_ENABLED",
+  "DP_REOPEN_ON_RECATEGORIZE",
 ]);
 
 // Defense-in-depth: the content script already blocks these actions client
@@ -388,34 +376,6 @@ function dispatchAssignerMessage(message, sendResponse) {
       status: message.status || "", bedrooms: message.bedrooms || "",
       crmStatus: message.crmStatus || "", title: message.title || "",
       listingRef: message.listingRef || "" }, sendResponse);
-    return true;
-  }
-
-  // Read-only — who the fairness picker would recommend right now for a
-  // given (currently unassigned) listing. Used by the manual-assign UI to
-  // show a suggestion next to the Assign button; never writes anything.
-  if (message.type === "DP_GET_RECOMMENDATION") {
-    fetchWithTimeout(buildAssignerActionGetUrl("recommend", { ref: message.ref || "" }))
-      .then(r => r.json())
-      .then(data => sendResponse({ ok: !data.error, data, error: data.error }))
-      .catch(err => sendResponse({ ok: false, error: String(err) }));
-    return true;
-  }
-
-  // Read-only — current auto-assign enabled/window/active state, for the
-  // Dashboard's 3-state indicator.
-  if (message.type === "DP_GET_AUTO_ASSIGN_STATUS") {
-    fetchWithTimeout(buildAssignerActionGetUrl("autoAssignStatus"))
-      .then(r => r.json())
-      .then(data => sendResponse({ ok: !data.error, data, error: data.error }))
-      .catch(err => sendResponse({ ok: false, error: String(err) }));
-    return true;
-  }
-
-  // Toggles auto-assign on/off. Applies immediately for everyone (server-
-  // side flag, not per-tab), regardless of who flips it.
-  if (message.type === "DP_SET_AUTO_ASSIGN_ENABLED") {
-    postToAssignerSheet({ action: "setAutoAssignEnabled", enabled: !!message.enabled }, sendResponse);
     return true;
   }
 
