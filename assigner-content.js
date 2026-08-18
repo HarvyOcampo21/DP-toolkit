@@ -1177,7 +1177,14 @@
     const entry = assignmentCache[ref];
     if (!entry || (entry.status !== "Rejected" && entry.status !== "Completed")) return;
     if (!CATEGORY_OPTIONS.includes(liveCrmStatus)) return;
-    if (liveCrmStatus === entry.crmStatus) return; // nothing's actually changed
+    // NOTE: deliberately no "liveCrmStatus === entry.crmStatus" check here.
+    // A rejection/rework cycle that comes back under the SAME category
+    // (e.g. Photos For QC → rejected → Approved → Photos For QC again) is
+    // just as genuine a new task as one that comes back under a different
+    // category — the server side already treats it that way (see
+    // reopenOnCategoryChange's comments). An equality check here would
+    // silently block the request from ever being SENT in the first place
+    // for that exact case, regardless of what the server would have done.
 
     const key = "reopen:" + liveCrmStatus;
     if (metaSyncCache[ref] === key) return; // already attempted this exact transition
@@ -1195,7 +1202,20 @@
         // optimistic update here uses, so a stale poll can't clobber it.
         // downloadedAt/downloadedCache cleared too, matching the backend
         // reset — whatever was downloaded belongs to the old shoot.
-        assignmentCache[ref] = { ...entry, editor: "", status: "Unassigned", crmStatus: liveCrmStatus, downloadedAt: "" };
+        //
+        // Respects the server's actual auto-assign result rather than
+        // always assuming Unassigned — if Auto-Assign was on and picked
+        // someone, resp.data.autoAssigned/editor reflect that, and showing
+        // "Unassigned" here for even a moment would be actively wrong, not
+        // just stale.
+        const wasAutoAssigned = !!resp.data.autoAssigned && !!resp.data.editor;
+        assignmentCache[ref] = {
+          ...entry,
+          editor: wasAutoAssigned ? resp.data.editor : "",
+          status: wasAutoAssigned ? "Assigned" : "Unassigned",
+          crmStatus: liveCrmStatus,
+          downloadedAt: "",
+        };
         delete downloadedCache[ref];
         lastLocalChangeAt[ref] = Date.now();
         processRows();
@@ -1549,6 +1569,18 @@
       autoAssignToggleInput = autoAssignInput;
       autoAssignStatusDot = statusDot;
       autoAssignStatusText = statusText;
+
+      // The CRM rebuilds this whole filter bar from scratch on every
+      // category-tab switch (Offplan/Agent Requests/Upload Pending/etc),
+      // which recreates these DOM nodes fresh every time — but the
+      // autoAssignStatus DATA object above survives in memory across
+      // rebuilds. Paint the already-known state immediately rather than
+      // leaving a brand-new "Checking…"/disabled node sitting there for up
+      // to a minute until the next scheduled interval tick happens to fire.
+      updateAutoAssignStatusUI();
+      // Still worth a fresh fetch too — the last known state could be
+      // meaningfully old if nobody's switched tabs in a while.
+      refreshAutoAssignStatus();
 
       bar.appendChild(autoAssignSection);
     }

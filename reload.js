@@ -98,6 +98,10 @@ const CHANGELOG = [
       { version: 51, notes: [
     "The Auto-Assign on/off switch now also lives right in the filter bar (seniors only), next to Bedrooms/Sort/Editor/Status \u2014 no need to open the separate Dashboard just to check or flip it.",
   ]},
+      { version: 52, notes: [
+    "Fixed Auto-Assign not actually reopening listings that came back under the SAME category as before (e.g. Photos For QC \u2192 rejected \u2192 Photos For QC again) \u2014 same root cause as a fix a couple versions back, just on the other side of the connection this time.",
+    "Fixed the Auto-Assign switch in the filter bar getting stuck showing \u201cChecking\u2026\u201d and appearing off every time you switched between category tabs (Offplan Pending, Agent Requests, Upload Pending, etc.) \u2014 it now shows the real status right away.",
+  ]},
 ];
 
 const card = document.getElementById("card");
