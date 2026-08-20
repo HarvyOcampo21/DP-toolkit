@@ -285,9 +285,30 @@ function setHookEnabled(val) {
      visibly "stuck" hovering on the page.
   ======================= */
   function findAgentAvatarTrigger() {
-    const img = document.querySelector(
-      'img[src*="cdn.crm.drivenproperties.com"][alt="Profile Image"]',
-    ) || document.querySelector('img[src*="cdn.crm.drivenproperties.com"]');
+    // Scoped to the same [data-v-8e28dde2] sidebar/summary component that
+    // getSidebarValue() above reads Category/Beds/Furnishing from — the
+    // agent avatar is rendered by that same component (confirmed by
+    // inspecting the live element), while the Photo Gallery and Recent
+    // Activities sections are separate Vue components with their own
+    // scope ids. That's what keeps this from ever matching a gallery
+    // thumbnail or a Recent Activities avatar, even though all of them
+    // can share the same cdn.crm.drivenproperties.com host once a
+    // listing has photos uploaded.
+    //
+    // Not filtered by alt text: the real element's alt attribute is
+    // actually empty (confirmed live) — not "Profile Image" as
+    // originally assumed — so that filter never matched anything, and
+    // this was silently falling through to an unscoped
+    // `img[src*=cdn...]` query instead, which is exactly what let a
+    // gallery photo win once one existed.
+    const scope = '[data-v-8e28dde2]';
+    let img = document.querySelector(`${scope} img.is-rounded-full.has-border-shadow`);
+    if (!img) {
+      // Fallback if those class names ever change: same scope, matched
+      // by the avatar's URL path segment instead ("/image/user/employee/"
+      // — distinct from wherever gallery/listing photos are served from).
+      img = document.querySelector(`${scope} img[src*="cdn.crm.drivenproperties.com/image/user/employee/"]`);
+    }
     if (!img) return null;
     return img.closest('[class*="is-image-fit"]') || img.parentElement;
   }
