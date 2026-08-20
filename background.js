@@ -463,6 +463,7 @@ async function handleLogToSheet(data) {
     data.rejectionReason || "",
     data.subType || "",
     data.notes || "",
+    data.agentName || "",
   ];
 
   const response = await fetchWithTimeout(COPIER_APPS_SCRIPT_URL, {

@@ -91,6 +91,9 @@ const CHANGELOG = [
     "Fixed rejected/completed listings not reopening for reassignment when the CRM's status came back to the SAME category as before (e.g. Photos For QC \u2192 rejected \u2192 Photos For QC again) \u2014 this now works the same as when it comes back under a different category.",
     "Each rework cycle is now tracked as its own entry, so completed/rejected counts stay accurate no matter how many times a listing gets reshot \u2014 and Time History now shows the full story across every cycle, start to finish.",
   ]},
+      { version: 50, notes: [
+    "The assigned agent's name is now captured and logged automatically on Complete, Reject, and manual Log to Sheet \u2014 no more needing to hover the agent's photo yourself to see who it was.",
+  ]},
 ];
 
 const card = document.getElementById("card");

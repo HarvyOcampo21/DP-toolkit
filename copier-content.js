@@ -274,9 +274,69 @@ function setHookEnabled(val) {
   }
 
   /* =======================
+     ASSIGNED AGENT EXTRACTOR
+     The agent's name/email/phone live in a teleported ".profile-info"
+     card that the CRM only mounts into the DOM when you hover the
+     assigned-agent avatar (a Vue v-if, not just a CSS-hidden element —
+     confirmed via DevTools: the avatar wrapper shows empty <!----> comment
+     placeholders until hovered). So we can't just read it — we fire the
+     same mouse events Vue listens for on the avatar, wait a tick for the
+     card to mount, read it, then fire the leave events so nothing is left
+     visibly "stuck" hovering on the page.
+  ======================= */
+  function findAgentAvatarTrigger() {
+    const img = document.querySelector(
+      'img[src*="cdn.crm.drivenproperties.com"][alt="Profile Image"]',
+    ) || document.querySelector('img[src*="cdn.crm.drivenproperties.com"]');
+    if (!img) return null;
+    return img.closest('[class*="is-image-fit"]') || img.parentElement;
+  }
+
+  function extractAgentInfoFromDom() {
+    // The hover card is teleported elsewhere in the DOM (not nested inside
+    // the avatar) — identified by its own "profile-info" class.
+    const card = document.querySelector(".profile-info");
+    if (!card) return { name: "", email: "", phone: "" };
+
+    const nameEl = card.querySelector("h3");
+    const name = nameEl ? nameEl.textContent.trim() : "";
+
+    const text = card.innerText.replace(/\s+/g, " ").trim();
+    const email = (text.match(/[\w.+-]+@drivenproperties\.com/) || [""])[0];
+    const phone = (text.match(/\+?\d[\d\s-]{7,}\d/) || [""])[0];
+
+    return { name, email, phone };
+  }
+
+  async function getAgentInfo() {
+    const trigger = findAgentAvatarTrigger();
+    if (!trigger) return { name: "", email: "", phone: "" };
+
+    // Already mounted? (covers the case where the card happens to already
+    // be open, e.g. user was just hovering it themselves)
+    let info = extractAgentInfoFromDom();
+    if (info.name) return info;
+
+    const opts = { bubbles: true, cancelable: true, view: window };
+    trigger.dispatchEvent(new MouseEvent("mouseenter", opts));
+    trigger.dispatchEvent(new MouseEvent("mouseover", opts));
+
+    // Give Vue a tick to mount the teleported card
+    await new Promise((r) => setTimeout(r, 150));
+
+    info = extractAgentInfoFromDom();
+
+    trigger.dispatchEvent(new MouseEvent("mouseleave", opts));
+    trigger.dispatchEvent(new MouseEvent("mouseout", opts));
+
+    return info;
+  }
+
+  /* =======================
      GATHER ALL DATA
   ======================= */
-  function gatherAllData() {
+  async function gatherAllData() {
+    const agent = await getAgentInfo();
     return {
       reqNumber: getExactText(/^DP-REQ-\d+/), // ⚠️ critical — do not modify
       listingRef: getExactText(/^(DP|CBB|DPA)-(S|R)-\d+/), // ⚠️ critical — do not modify
@@ -287,6 +347,9 @@ function setHookEnabled(val) {
       beds: getSidebarValue("Beds"),
       furnishing: getSidebarValue("Furnishing"),
       photographer: getPhotographer(),
+      agentName: agent.name || "",
+      agentEmail: agent.email || "",
+      agentPhone: agent.phone || "",
     };
   }
 
@@ -361,10 +424,13 @@ function setHookEnabled(val) {
     });
   }
 
-  function _buildLogModal(editorName, presets) {
+  async function _buildLogModal(editorName, presets) {
     if (document.getElementById("dp-log-modal")) return;
 
-    const data = gatherAllData();
+    const data = await gatherAllData();
+    // A second guard after the await — the modal may have been opened by
+    // another trigger while we were waiting on the agent-hover lookup.
+    if (document.getElementById("dp-log-modal")) return;
     const dark = isSiteDarkMode();
     const hasPhotographer = !!data.photographer;
     const noEditor = !editorName;
@@ -425,6 +491,7 @@ function setHookEnabled(val) {
             ${modalRow("Beds", data.beds, labelCol)}
             ${modalRow("Furnishing", data.furnishing, labelCol)}
             ${modalRow("Photographer", data.photographer || "—", labelCol)}
+            ${modalRow("Agent", data.agentName || "—", labelCol)}
           </div>
 
           <!-- Re-shoot toggle -->
@@ -819,8 +886,8 @@ function setHookEnabled(val) {
   /* =======================
      QUICK LOG
   ======================= */
-  function quickLogToSheet() {
-    const data   = gatherAllData();
+  async function quickLogToSheet() {
+    const data   = await gatherAllData();
     const status = getListingStatus();
 
     // ── Determine List Type from page status (Complete hook now auto-
@@ -1156,8 +1223,8 @@ function setHookEnabled(val) {
     true,
   );
 
-  function quickLogWithType(listType, subType) {
-    const data = gatherAllData();
+  async function quickLogWithType(listType, subType) {
+    const data = await gatherAllData();
 
     const now = new Date();
     const formattedDate = new Intl.DateTimeFormat("en-US", {
@@ -1458,8 +1525,8 @@ function insertButtons() {
   /* =======================
      COPY DATA (for Dashboard Edit Modal paste)
   ======================= */
-  function copyAllData() {
-    const data = gatherAllData();
+  async function copyAllData() {
+    const data = await gatherAllData();
 
     // Only the fields needed by the Edit modal paste function
     const payload = {

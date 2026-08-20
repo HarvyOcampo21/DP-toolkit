@@ -36,6 +36,7 @@ var COPIER_HEADERS = [
   "Rejection Reason",
   "Agent Request Sub-type",
   "Notes",
+  "Agent Name",
 ];
 
 var LIFESTYLE_HEADERS = ["Date", "Editor", "Lifestyle", "Profile", "Others"];
