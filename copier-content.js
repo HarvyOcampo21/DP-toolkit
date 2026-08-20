@@ -397,6 +397,27 @@ function setHookEnabled(val) {
     return getAgentInfo();
   }
 
+  // A mouseenter on Complete/Reject only fires if the cursor actually
+  // crosses into the button — if it was already resting there when the
+  // panel rendered (common: the button sits in the same screen spot
+  // listing after listing), no mouseenter ever comes and the cache is
+  // never warmed. So don't rely on hover alone: call this once shortly
+  // after the panel opens, while it's guaranteed idle, and again on each
+  // watcher tick until it succeeds — a no-op once the current listing is
+  // already cached (currentListingKey() match), so it doesn't keep
+  // re-triggering the hover flicker after that.
+  let _warmingInFlight = false;
+  async function ensureAgentInfoWarmed() {
+    if (_warmingInFlight) return;
+    if (_cachedAgentInfoKey === currentListingKey()) return; // already have this listing's agent
+    _warmingInFlight = true;
+    try {
+      await warmAgentInfoCache();
+    } finally {
+      _warmingInFlight = false;
+    }
+  }
+
   /* =======================
      GATHER ALL DATA
   ======================= */
@@ -1158,6 +1179,9 @@ function setHookEnabled(val) {
   ======================= */
   var _completeHooked = false;
   var _agentWarmHooked = false;
+  var _hookedCompleteBtn = null; // tracked so we can detect Vue swapping in a new button
+  var _hookedRejectBtn = null;
+  var _hookedCompleteClickBtn = null;
 
   // Scoped to the CRM's own native action buttons (button.custom-dropdown-
   // trigger.are-action.is-wide) rather than any button on the page whose
@@ -1186,18 +1210,29 @@ function setHookEnabled(val) {
   // even if auto-log is toggled off; someone can still click Complete/
   // Reject manually and the cache just makes that hover-based lookup
   // more reliable too.
+  //
+  // Re-checks .isConnected on every call rather than trusting
+  // _agentWarmHooked forever: when the CRM moves to a different listing
+  // without a full panel close (Vue swaps the drawer's contents in place),
+  // it can replace these button elements outright. A listener attached to
+  // the old, now-detached button silently stops firing, and without this
+  // check we'd never notice and never warm the cache again for any
+  // listing after that — exactly the kind of gap that could let a stale
+  // cache entry (see currentListingKey() above) go unnoticed for longer
+  // than it should.
   function hookAgentInfoWarming() {
-    if (_agentWarmHooked) return;
-
     const completeBtn = findActionButton("complete");
     const rejectBtn = findActionButton("reject");
     if (!completeBtn && !rejectBtn) return;
 
-    [completeBtn, rejectBtn].filter(Boolean).forEach((btn) => {
-      btn.addEventListener("mouseenter", () => {
-        warmAgentInfoCache();
-      });
-    });
+    if (completeBtn && completeBtn !== _hookedCompleteBtn) {
+      completeBtn.addEventListener("mouseenter", () => warmAgentInfoCache());
+      _hookedCompleteBtn = completeBtn;
+    }
+    if (rejectBtn && rejectBtn !== _hookedRejectBtn) {
+      rejectBtn.addEventListener("mouseenter", () => warmAgentInfoCache());
+      _hookedRejectBtn = rejectBtn;
+    }
 
     _agentWarmHooked = true;
   }
@@ -1205,12 +1240,15 @@ function setHookEnabled(val) {
   function hookCompleteButton() {
     hookAgentInfoWarming();
 
-    if (_completeHooked || !isHookEnabled()) return;
-
     const completeBtn = findActionButton("complete");
-
     if (!completeBtn) return;
 
+    // Same staleness check as above — if Vue swapped in a new Complete
+    // button for a new listing, _completeHooked being true from the old
+    // one must not stop us from hooking the new one too.
+    if (completeBtn === _hookedCompleteClickBtn || !isHookEnabled()) return;
+
+    _hookedCompleteClickBtn = completeBtn;
     _completeHooked = true;
 
     completeBtn.addEventListener(
@@ -1571,12 +1609,21 @@ function insertButtons() {
   if (isHookEnabled()) {
     hookCompleteButton();
   }
+
+  // Give the sidebar a moment to finish rendering, then warm the agent
+  // cache right away — see ensureAgentInfoWarmed() below for why this
+  // can't just wait for a mouseenter.
+  setTimeout(ensureAgentInfoWarmed, 500);
 }
 
   function removeButtons() {
     document.getElementById("dp-button-wrapper")?.remove();
     _completeHooked = false;
     _agentWarmHooked = false; // re-find + re-hook Complete/Reject for whatever listing opens next
+    _hookedCompleteBtn = null;
+    _hookedRejectBtn = null;
+    _hookedCompleteClickBtn = null;
+    _warmingInFlight = false;
     clearAgentInfoCache(); // don't carry a hovered agent over onto a different listing
   }
 
@@ -1594,12 +1641,20 @@ function insertButtons() {
 
     if (panelOpen && !buttonsExist) insertButtons();
     else if (!panelOpen && buttonsExist) removeButtons();
-    else if (panelOpen && !_agentWarmHooked) {
-  hookAgentInfoWarming();
-}
-    else if (panelOpen && !_completeHooked && isHookEnabled()) {
-  hookCompleteButton();
-}
+    else if (panelOpen) {
+      // Called every tick, not just once — both functions compare the
+      // freshly-found button against the one they last hooked and only
+      // do work when it's actually different. That's what catches Vue
+      // swapping in a new Complete/Reject button for a new listing
+      // without a full panel close, which a one-time "already hooked"
+      // flag check would otherwise miss silently.
+      hookAgentInfoWarming();
+      if (isHookEnabled()) hookCompleteButton();
+      // Retries itself until the current listing's agent is actually
+      // cached — covers the case where the very first attempt (right
+      // after insertButtons) ran before the avatar image had loaded.
+      ensureAgentInfoWarmed();
+    }
   }, 600);
 
   /* =======================
