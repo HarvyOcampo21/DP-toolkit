@@ -333,10 +333,75 @@ function setHookEnabled(val) {
   }
 
   /* =======================
+     AGENT INFO CACHE
+     getAgentInfo() above only works while the panel is idle — the avatar
+     it hovers lives inside the sidebar, and on Complete/Reject the CRM
+     swaps that sidebar out from under a full-panel loading overlay
+     (z-index 10001) the moment its own click handler runs. By the time
+     our Complete hook's 300ms delay (or the Reject modal's Submit) gets
+     around to calling gatherAllData(), the avatar element is already
+     gone and the hover finds nothing.
+     Fix: don't wait until then. Warm this cache on "mouseenter" of the
+     Complete/Reject buttons themselves, while the panel is still idle —
+     by the time someone actually clicks, they've almost always hovered
+     first, so this gives us a clean read before the CRM's own click
+     handler ever kicks off that save/loading transition. gatherAllData()
+     below reads the cache first and only falls back to a live hover (old
+     behavior) if nothing warmed it — e.g. "Quick Log" clicked directly
+     without hovering Complete/Reject first.
+
+     SAFETY: the cache is keyed to the exact listing it was warmed on
+     (reqNumber + listingRef), not just a time window. removeButtons()
+     already clears it on panel close, and hashchange already fires
+     between listings — but neither is something this should have to
+     depend on to stay correct. If the key on read doesn't match the key
+     it was warmed with (wrong listing, or nothing warmed it at all), the
+     cache is ignored outright and we fall back to a live hover rather
+     than ever attribute one listing's agent to another.
+  ======================= */
+  let _cachedAgentInfo = null;
+  let _cachedAgentInfoAt = 0;
+  let _cachedAgentInfoKey = "";
+  const AGENT_CACHE_MAX_AGE_MS = 60000; // extra guard on top of the key match, for a long-idle tab
+
+  function currentListingKey() {
+    // Two independent identifiers, in case either one is ever blank on a
+    // given listing type — either mismatching is enough to invalidate.
+    const reqNumber = getExactText(/^DP-REQ-\d+/);
+    const listingRef = getExactText(/^(DP|CBB|DPA)-(S|R)-\d+/);
+    return reqNumber + "|" + listingRef;
+  }
+
+  async function warmAgentInfoCache() {
+    const key = currentListingKey();
+    const info = await getAgentInfo();
+    if (info && info.name) {
+      _cachedAgentInfo = info;
+      _cachedAgentInfoAt = Date.now();
+      _cachedAgentInfoKey = key;
+    }
+  }
+
+  function clearAgentInfoCache() {
+    _cachedAgentInfo = null;
+    _cachedAgentInfoAt = 0;
+    _cachedAgentInfoKey = "";
+  }
+
+  async function getAgentInfoCached() {
+    const sameListing = _cachedAgentInfoKey && _cachedAgentInfoKey === currentListingKey();
+    const freshEnough = Date.now() - _cachedAgentInfoAt < AGENT_CACHE_MAX_AGE_MS;
+    if (_cachedAgentInfo && sameListing && freshEnough) {
+      return _cachedAgentInfo;
+    }
+    return getAgentInfo();
+  }
+
+  /* =======================
      GATHER ALL DATA
   ======================= */
   async function gatherAllData() {
-    const agent = await getAgentInfo();
+    const agent = await getAgentInfoCached();
     return {
       reqNumber: getExactText(/^DP-REQ-\d+/), // ⚠️ critical — do not modify
       listingRef: getExactText(/^(DP|CBB|DPA)-(S|R)-\d+/), // ⚠️ critical — do not modify
@@ -1092,28 +1157,57 @@ function setHookEnabled(val) {
      Hooks into the CRM's Complete button and triggers logging automatically
   ======================= */
   var _completeHooked = false;
+  var _agentWarmHooked = false;
 
-  function hookCompleteButton() {
-    if (_completeHooked || !isHookEnabled()) return;
-
-    // Find the Complete button. Scoped to the CRM's own native action
-    // button (button.custom-dropdown-trigger.are-action.is-wide with a
-    // "Complete" span inside) rather than any button on the page whose
-    // text happens to say "Complete" — the DP Photo Assigner half of this
-    // extension can inject its own backup Complete button into the same
-    // drawer toolbar when the CRM's native one is missing (e.g. reshoots),
-    // and a plain text match would wrongly pick that up too, double-firing
-    // this hook. The dp- id/class check below is a second safety net in
-    // case that button's markup ever changes.
-    const completeBtn = [...document.querySelectorAll(
+  // Scoped to the CRM's own native action buttons (button.custom-dropdown-
+  // trigger.are-action.is-wide) rather than any button on the page whose
+  // text happens to match — the DP Photo Assigner half of this extension
+  // can inject its own backup Complete button into the same drawer
+  // toolbar when the CRM's native one is missing (e.g. reshoots), and a
+  // plain text match would wrongly pick that up too. The dp- id/class
+  // check below is a second safety net in case that button's markup ever
+  // changes.
+  function findActionButton(labelText) {
+    return [...document.querySelectorAll(
       "button.custom-dropdown-trigger.are-action.is-wide"
     )].find((btn) => {
       if (btn.id && btn.id.indexOf("dp-") === 0) return false;
       if (btn.closest('[id^="dp-"]')) return false;
       const span = btn.querySelector("span");
       const text = (span ? span.textContent : btn.textContent).trim().toLowerCase();
-      return text === "complete";
+      return text === labelText;
     });
+  }
+
+  // Warms the agent-info cache (see above) on hover of the Complete and
+  // outer Reject buttons, before either one's click can kick off the
+  // CRM's save/loading overlay. Kept as its own hook — independent of
+  // _completeHooked/isHookEnabled — since we still want the cache warmed
+  // even if auto-log is toggled off; someone can still click Complete/
+  // Reject manually and the cache just makes that hover-based lookup
+  // more reliable too.
+  function hookAgentInfoWarming() {
+    if (_agentWarmHooked) return;
+
+    const completeBtn = findActionButton("complete");
+    const rejectBtn = findActionButton("reject");
+    if (!completeBtn && !rejectBtn) return;
+
+    [completeBtn, rejectBtn].filter(Boolean).forEach((btn) => {
+      btn.addEventListener("mouseenter", () => {
+        warmAgentInfoCache();
+      });
+    });
+
+    _agentWarmHooked = true;
+  }
+
+  function hookCompleteButton() {
+    hookAgentInfoWarming();
+
+    if (_completeHooked || !isHookEnabled()) return;
+
+    const completeBtn = findActionButton("complete");
 
     if (!completeBtn) return;
 
@@ -1482,6 +1576,8 @@ function insertButtons() {
   function removeButtons() {
     document.getElementById("dp-button-wrapper")?.remove();
     _completeHooked = false;
+    _agentWarmHooked = false; // re-find + re-hook Complete/Reject for whatever listing opens next
+    clearAgentInfoCache(); // don't carry a hovered agent over onto a different listing
   }
 
   /* =======================
@@ -1498,6 +1594,9 @@ function insertButtons() {
 
     if (panelOpen && !buttonsExist) insertButtons();
     else if (!panelOpen && buttonsExist) removeButtons();
+    else if (panelOpen && !_agentWarmHooked) {
+  hookAgentInfoWarming();
+}
     else if (panelOpen && !_completeHooked && isHookEnabled()) {
   hookCompleteButton();
 }
