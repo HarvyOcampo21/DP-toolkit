@@ -110,6 +110,10 @@ const CHANGELOG = [
       { version: 55, notes: [
     "Auto-assign now only fires while the CRM's own status still shows Upload Pending, Offplan Pending, Photos For QC, or Stock Photos For QC \u2014 previously it could pick up other rows too. Manual assigning/reassigning is unaffected.",
   ]},
+      { version: 56, notes: [
+    "Auto-assign now always starts OFF on every fresh page load or refresh \u2014 it no longer remembers being left on from a previous session, so it always has to be turned on by hand.",
+    "Even when turned on, auto-assign now waits for the CRM's own listings to fully finish loading (which can take a few seconds up to about a minute) before it will assign anything \u2014 the filter bar shows \u201cPreparing\u2026\u201d during that wait.",
+  ]},
 ];
 
 const card = document.getElementById("card");

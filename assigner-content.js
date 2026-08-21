@@ -114,8 +114,45 @@
   function updateAutoAssignIndicator() {
     const el = document.querySelector(".dp-auto-assign-indicator");
     if (!el) return;
+    if (autoAssignEnabled && !autoAssignArmed) {
+      el.textContent = "\u2192 Preparing\u2026 (loading data)";
+      return;
+    }
     const { next, counts } = getAutoAssignRecommendation();
     el.textContent = next ? `\u2192 Next up: ${next} (${counts[next] || 0} today)` : "";
+  }
+
+  // Tracks whether the CRM's own page has settled — called on every
+  // processRows() pass with however many rows are currently in the DOM.
+  // "Settled" means the row count has held steady for a few consecutive
+  // passes (CRM_SETTLE_STABLE_PASSES) AND at least CRM_SETTLE_MIN_MS has
+  // elapsed since this content script started, so a CRM that happens to
+  // report the same (wrong/partial) count twice in a row right at page
+  // load doesn't get mistaken for "done loading." Once true, this never
+  // resets back to false — later legitimate row-count changes (new
+  // requests coming in, listings leaving the view) are normal live
+  // activity, not "still loading," and shouldn't re-block auto-assign.
+  function maybeMarkCrmRowsSettled(rowCount) {
+    if (crmRowsSettled) return;
+    if (rowCount === crmRowCountLastSeen) {
+      crmRowStableStreak++;
+    } else {
+      crmRowCountLastSeen = rowCount;
+      crmRowStableStreak = 1;
+    }
+    if (crmRowStableStreak >= CRM_SETTLE_STABLE_PASSES &&
+        Date.now() - CONTENT_SCRIPT_STARTED_AT >= CRM_SETTLE_MIN_MS) {
+      crmRowsSettled = true;
+      armAutoAssignIfReady();
+    }
+  }
+
+  // Flips autoAssignArmed on once, only when both independent conditions
+  // (our sheet fetched + rendered, and the CRM's own rows settled) are
+  // true. Safe to call redundantly from either side as soon as its own
+  // condition lands — it just no-ops until the other one has too.
+  function armAutoAssignIfReady() {
+    if (!autoAssignArmed && autoAssignArmDone && crmRowsSettled) autoAssignArmed = true;
   }
 
   // Auto-assigns a freshly-appeared Unassigned listing to whoever the
@@ -201,16 +238,38 @@
   // Round-robin auto-assign — see the "── Round-robin auto-assign ──"
   // section below for the recommendation/assignment logic itself.
   let autoAssignEnabled = false;
+  // autoAssignArmed only flips true once BOTH of these are true:
+  //   (1) autoAssignArmDone  — our own assigner sheet has been fetched and
+  //       rendered at least once (see refreshAssignments).
+  //   (2) crmRowsSettled     — the CRM's own page has finished loading its
+  //       listing rows (see maybeMarkCrmRowsSettled below).
   // Stays false until the very first Apps Script fetch has come back and
   // been rendered once. Without this, turning the toggle on from a prior
-  // session (it's persisted) would, on page load, treat every listing
-  // that's been sitting Unassigned for days as "brand new" and auto-assign
-  // the entire backlog in one burst the instant the page opens. Flips to
-  // true right after that first render and stays true for the rest of the
-  // tab's life — every listing that shows up as newly-Unassigned from that
-  // point on is genuinely new.
+  // session would, on page load, treat every listing that's been sitting
+  // Unassigned for days as "brand new" and auto-assign the entire backlog
+  // in one burst the instant the page opens. Flips to true right after
+  // that first render and stays true for the rest of the tab's life —
+  // every listing that shows up as newly-Unassigned from that point on is
+  // genuinely new.
   let autoAssignArmed = false;
   let autoAssignArmDone = false;
+  // The CRM is its own separate app with its own server round-trip — its
+  // rows can still be mid-load (or only partially loaded) for anywhere
+  // from a few seconds to as long as a minute after this page/tab opens
+  // or is refreshed, well after OUR sheet fetch above has already
+  // resolved. Auto-assigning off a half-loaded CRM page risks reading a
+  // listing's live status wrong (or missing rows entirely), so this is a
+  // second, independent gate: it only flips true once the number of rows
+  // the CRM is showing has stopped changing across a few consecutive
+  // polls AND a minimum settle window has passed — see
+  // maybeMarkCrmRowsSettled. Like autoAssignArmDone, this only ever goes
+  // false → true, never back, for the life of the tab.
+  let crmRowsSettled = false;
+  let crmRowCountLastSeen = -1;
+  let crmRowStableStreak = 0;
+  const CRM_SETTLE_MIN_MS = 5000;
+  const CRM_SETTLE_STABLE_PASSES = 3;
+  const CONTENT_SCRIPT_STARTED_AT = Date.now();
   // Refs currently mid-flight through an auto-triggered assign() call —
   // prevents the same ref from being auto-assigned a second time by a poll
   // that lands while the first attempt's write (and its verify-before-
@@ -1367,6 +1426,7 @@
 
   function processRows() {
     const rows = getAllRows();
+    maybeMarkCrmRowsSettled(rows.length);
     rows.forEach(row => {
       if (row.dataset.dpOrigIndex === undefined) {
         row.dataset.dpOrigIndex = String(origIndexCounter++);
@@ -1683,7 +1743,8 @@
       autoAssignInput.checked = autoAssignEnabled;
       autoAssignInput.addEventListener("change", () => {
         autoAssignEnabled = autoAssignInput.checked;
-        try { chrome.storage.local.set({ dpAutoAssignEnabled: autoAssignEnabled }); } catch (e) {}
+        // Not persisted to storage — see the init block for why auto-assign
+        // deliberately never restores across a fresh page load/refresh.
         updateAutoAssignIndicator();
       });
       const autoAssignSlider = document.createElement("span");
@@ -1791,12 +1852,12 @@
         assignmentCache = mergedAssign;
         downloadedCache = mergedDownloaded;
         processRows();
-        // Arm auto-assign only AFTER this pass has rendered — so if the
-        // toggle was already on from a previous session, this first pass
-        // (which can contain a whole backlog of long-Unassigned listings)
-        // is exempt, and only listings that appear from here on are
-        // treated as "new" and eligible for auto-assignment.
-        if (!autoAssignArmDone) { autoAssignArmDone = true; autoAssignArmed = true; }
+        // Marks the sheet-fetch half of the arming condition done. The
+        // other half (crmRowsSettled) is tracked independently in
+        // processRows/maybeMarkCrmRowsSettled — armAutoAssignIfReady only
+        // actually arms once both have landed, in whichever order they
+        // happen to resolve.
+        if (!autoAssignArmDone) { autoAssignArmDone = true; armAutoAssignIfReady(); }
 
         // Persist for next page load — see the init block's hydration
         // step below for why. chrome.storage.local's quota/write-rate is
@@ -3366,16 +3427,19 @@
   }), 800);
 
   // ── Init (reads role + name from storage before starting) ───────────────
-  chrome.storage.local.get(["role", "myName", "dpAssignSnapshot", "dpOpenListingNewTab", "dpAutoAssignEnabled"], result => {
+  chrome.storage.local.get(["role", "myName", "dpAssignSnapshot", "dpOpenListingNewTab"], result => {
     ROLE = (result && result.role) || "senior";
     MY_NAME = (result && result.myName) || "";
     // Default OFF — only on if explicitly turned on before.
     openListingInNewTabEnabled = !!(result && result.dpOpenListingNewTab === true);
-    // Default OFF here too — auto-assign only ever runs because someone
-    // deliberately flipped the toggle (see autoAssignArmed above for why a
-    // toggle that was already on from a prior session still can't sweep an
-    // existing backlog the instant this page loads).
-    autoAssignEnabled = !!(result && result.dpAutoAssignEnabled === true);
+    // Auto-assign is intentionally NEVER restored from a prior session —
+    // every fresh page load/refresh starts with it OFF, full stop, even if
+    // it was left on before. It has to be turned back on by hand each time.
+    // This is deliberate, not an oversight: a stale "on" from last time
+    // would otherwise start silently auto-assigning the moment this page
+    // is trusted (see armAutoAssignIfReady below) with nobody having
+    // actually looked at the board first.
+    autoAssignEnabled = false;
 
     // Hydrate from the last-known snapshot (saved after every successful
     // refresh — see refreshAssignments) BEFORE the first render pass runs.
