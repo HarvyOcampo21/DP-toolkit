@@ -104,6 +104,9 @@ const CHANGELOG = [
       { version: 53, notes: [
     "Closed the remaining gap from v52: if two seniors' tabs still both attempt to auto-assign the exact same listing at once, the server now rejects the second one instead of silently overwriting the first \u2014 the losing tab corrects itself immediately instead of showing the wrong editor for a few seconds. Manual assigning/reassigning is unaffected.",
   ]},
+      { version: 54, notes: [
+    "Listings assigned by the round-robin auto-assigner now show \u201cAuto-assign (Name)\u201d as the Assigned By, instead of just the picking senior's name \u2014 so Time History makes it clear the system assigned it automatically, while still showing whose device it ran on. Manual assigns/reassigns are unchanged.",
+  ]},
 ];
 
 const card = document.getElementById("card");
