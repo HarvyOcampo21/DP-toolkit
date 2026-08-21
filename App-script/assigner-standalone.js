@@ -510,6 +510,17 @@ function assignerDoPost_impl(p) {
   const prevEditor = ex(ASSIGNER_COL.EDITOR);
   const prevStatus = ex(ASSIGNER_COL.STATUS);
 
+  // When the round-robin auto-assigner (not a deliberate popover click)
+  // is what triggered this assign, stamp AssignedBy with both facts at
+  // once: that it was auto-assigned, AND whose device it ran on — so a
+  // senior looking at Time History later can tell "the system did this"
+  // apart from "I did this", while still knowing which tab/device fired
+  // it if that ever needs chasing down (e.g. a stuck browser tab left
+  // open and auto-assigning overnight).
+  const assignedByLabel = p.isAutoAssign
+    ? `Auto-assign (${actionBy || "unknown"})`
+    : actionBy;
+
   // Auto-assign only, not manual: if this request is flagged as
   // machine-triggered (see the round-robin auto-assign feature) and, by
   // the time it actually gets to run under the lock above, the row has
@@ -545,7 +556,7 @@ function assignerDoPost_impl(p) {
     });
   } else if (ri === -1 || isFreshStart) {
     historyJson = appendHistory(historyJson, {
-      type: "assigned", ts: now.toISOString(), editor: editor, by: actionBy,
+      type: "assigned", ts: now.toISOString(), editor: editor, by: assignedByLabel,
     });
   }
 
@@ -559,7 +570,7 @@ function assignerDoPost_impl(p) {
       startedAt:       isFreshStart ? "" : ex(ASSIGNER_COL.STARTED_AT),
       onHoldAt:        "",
       onHoldReason:    "",
-      assignedBy:      isFreshStart ? actionBy : (ex(ASSIGNER_COL.ASSIGNED_BY) || actionBy),
+      assignedBy:      isFreshStart ? assignedByLabel : (ex(ASSIGNER_COL.ASSIGNED_BY) || assignedByLabel),
       reassignedFrom:  isReAssign ? prevEditor : ex(ASSIGNER_COL.REASSIGNED_FROM),
       reassignedTo:    isReAssign ? editor     : ex(ASSIGNER_COL.REASSIGNED_TO),
       reassignedBy:    isReAssign ? actionBy   : ex(ASSIGNER_COL.REASSIGNED_BY),
@@ -569,12 +580,12 @@ function assignerDoPost_impl(p) {
     })]);
   } else {
     sheet.appendRow(fullRow({ ref: p.ref, title, editor, status: "Assigned",
-      assignedAt: now, updatedAt: now, assignedBy: actionBy, history: historyJson,
+      assignedAt: now, updatedAt: now, assignedBy: assignedByLabel, history: historyJson,
       ...(crmStatusOverride ? { crmStatus: crmStatusOverride } : {}) }));
   }
   return jsonResponse({ ref: p.ref, title, editor, status: "Assigned",
     reAssigned: isReAssign, assignedAt: fmt(newAssignedAt),
-    assignedBy:     isFreshStart ? actionBy : (ex(ASSIGNER_COL.ASSIGNED_BY) || actionBy),
+    assignedBy:     isFreshStart ? assignedByLabel : (ex(ASSIGNER_COL.ASSIGNED_BY) || assignedByLabel),
     reassignedFrom: isReAssign ? prevEditor : ex(ASSIGNER_COL.REASSIGNED_FROM),
     reassignedTo:   isReAssign ? editor     : ex(ASSIGNER_COL.REASSIGNED_TO),
     reassignedBy:   isReAssign ? actionBy   : ex(ASSIGNER_COL.REASSIGNED_BY),
