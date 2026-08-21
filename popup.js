@@ -7,7 +7,7 @@ const NAME_ROLES = {
   Harvy:   "senior",
   Mark:    "senior",
   Sudheep: "senior",
-  Jabir:   "Senior",
+  Jabir:   "senior",
 };
 function roleForName(name) {
   return NAME_ROLES[name] || "junior"; // unknown names default to the safer role
