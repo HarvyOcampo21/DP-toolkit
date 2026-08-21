@@ -134,6 +134,11 @@ function findRowIndex(data, ref) {
   return -1;
 }
 function isTruthyCell(v) { return v === true || v === "TRUE" || v === "true"; }
+// Mirrors the client's isActiveStatus() (assigner-content.js) exactly —
+// "spoken for" means any real status other than blank/Unassigned. Used
+// below to let an auto-triggered assign back off if the row is no longer
+// eligible by the time this request actually gets to run under the lock.
+function isActiveAssignmentStatus(status) { return !!status && status !== "Unassigned"; }
 function fmt(d) {
   if (d === null || d === undefined || d === "") return "";
   if (typeof d === "object" && typeof d.getTime === "function") {
@@ -504,6 +509,30 @@ function assignerDoPost_impl(p) {
   const actionBy   = p.actionBy || "";
   const prevEditor = ex(ASSIGNER_COL.EDITOR);
   const prevStatus = ex(ASSIGNER_COL.STATUS);
+
+  // Auto-assign only, not manual: if this request is flagged as
+  // machine-triggered (see the round-robin auto-assign feature) and, by
+  // the time it actually gets to run under the lock above, the row has
+  // already been claimed by someone/something else since this request was
+  // sent, back off instead of overwriting. This is what actually closes
+  // the race a client-side check alone can't: two auto-assign requests for
+  // the same brand-new listing (e.g. from two different seniors' tabs,
+  // each unaware of the other) both reach the server within the same
+  // instant, but LockService only lets one run assignerDoPost_impl at a
+  // time — so whichever request's turn comes second re-reads the sheet
+  // fresh (see `data` above) and, if it sees the row is now genuinely
+  // Assigned/In Progress/etc., simply reports that back instead of writing
+  // a spurious "reassigned" over top of it. A manual assign/reassign from
+  // the popover never sets isAutoAssign, so this never affects a senior
+  // deliberately reassigning something that's already assigned — that
+  // still always goes through below as normal.
+  if (p.isAutoAssign && ri > -1 && isActiveAssignmentStatus(prevStatus)) {
+    return jsonResponse({
+      ref: p.ref, skipped: true, reason: "already assigned",
+      editor: prevEditor, status: prevStatus, updatedAt: fmt(ex(ASSIGNER_COL.UPDATED_AT)),
+    });
+  }
+
   const isReAssign = !!(ri > -1 && prevEditor && prevEditor !== editor);
   const isFreshStart = isReAssign || prevStatus === "Unassigned";
   const newAssignedAt = isFreshStart ? now : (ex(ASSIGNER_COL.ASSIGNED_AT) || now);

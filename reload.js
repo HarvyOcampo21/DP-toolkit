@@ -94,6 +94,16 @@ const CHANGELOG = [
       { version: 50, notes: [
     "The assigned agent's name is now captured and logged automatically on Complete, Reject, and manual Log to Sheet \u2014 no more needing to hover the agent's photo yourself to see who it was.",
   ]},
+      { version: 51, notes: [
+    "Added a round-robin auto-assign toggle for seniors \u2014 when on, new Unassigned listings are assigned automatically to whoever has the fewest assignments so far today, so the day's workload stays evenly spread without anyone needing to track it by hand. Resets on its own every day.",
+    "The Assign popover now shows each editor's assignment count for today and stars whoever the round-robin recommends next \u2014 useful for picking manually too, whether or not auto-assign is turned on.",
+  ]},
+      { version: 52, notes: [
+    "Auto-assign now staggers itself with a brief random delay and re-checks a listing is still unassigned right before writing \u2014 avoids two seniors' tabs both auto-assigning the same brand-new listing at the same moment when more than one senior has the board open.",
+  ]},
+      { version: 53, notes: [
+    "Closed the remaining gap from v52: if two seniors' tabs still both attempt to auto-assign the exact same listing at once, the server now rejects the second one instead of silently overwriting the first \u2014 the losing tab corrects itself immediately instead of showing the wrong editor for a few seconds. Manual assigning/reassigning is unaffected.",
+  ]},
 ];
 
 const card = document.getElementById("card");

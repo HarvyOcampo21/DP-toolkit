@@ -47,6 +47,113 @@
            status === "Rejected"    ? "rejected"   :
            status === "Completed"   ? "completed"  : "";
   }
+  // ── Round-robin auto-assign ──────────────────────────────────────────────
+  // Fully derived from assignmentCache (the shared, sheet-backed source of
+  // truth also used for everything else in this file) rather than a
+  // separately-persisted counter/rotation-pointer. Two upsides to that:
+  //   1. "Resets the next day" is automatic — today's counts are computed
+  //      by filtering to today's calendar date every time this runs, so
+  //      there's nothing to explicitly clear at midnight.
+  //   2. It stays correct across editors/tabs/machines without needing to
+  //      sync a rotation pointer between them — everyone computes the same
+  //      recommendation from the same shared data.
+  //
+  // "Today" is judged in each viewer's own local time zone (Date.toDateString
+  // on values already normalized to local time), which is what makes a
+  // day boundary/reset actually match when the office's day turns over.
+  function getAutoAssignRecommendation() {
+    const counts = {};
+    EDITORS.forEach(e => { counts[e] = 0; });
+    const todayStr = new Date().toDateString();
+    // Track whichever counted assignment happened most recently today, so
+    // ties (most commonly: everyone at 0 first thing in the morning) break
+    // by round-robin order continuing on from there, instead of always
+    // recommending the same first name in the list all day.
+    let lastPicked = null, lastPickedAt = -Infinity;
+    Object.keys(assignmentCache).forEach(ref => {
+      const entry = assignmentCache[ref];
+      if (!entry || !entry.editor || !EDITORS.includes(entry.editor)) return;
+      // Whichever is later: the original assign, or the most recent
+      // reassignment (which lands this ref on its *current* editor) — both
+      // represent the moment this editor picked up this piece of work.
+      const effectiveAt = entry.reassignedAt || entry.assignedAt;
+      if (!effectiveAt) return;
+      const d = new Date(effectiveAt);
+      if (isNaN(d.getTime()) || d.toDateString() !== todayStr) return;
+      counts[entry.editor] += 1;
+      const t = d.getTime();
+      if (t >= lastPickedAt) { lastPickedAt = t; lastPicked = entry.editor; }
+    });
+    const minCount = Math.min(...EDITORS.map(e => counts[e]));
+    const candidates = EDITORS.filter(e => counts[e] === minCount);
+    let next = null;
+    if (lastPicked) {
+      const startIdx = EDITORS.indexOf(lastPicked);
+      for (let i = 1; i <= EDITORS.length; i++) {
+        const cand = EDITORS[(startIdx + i) % EDITORS.length];
+        if (candidates.includes(cand)) { next = cand; break; }
+      }
+    }
+    if (!next) next = candidates[0];
+    return { next, counts };
+  }
+
+  // Keeps the "Next up" label in the filter bar current. Cheap enough to
+  // call on every processRows() pass (a handful of object lookups over
+  // assignmentCache, same cost as the recommendation itself) — no-ops
+  // harmlessly if the filter bar (senior-only) isn't in the DOM.
+  function updateAutoAssignIndicator() {
+    const el = document.querySelector(".dp-auto-assign-indicator");
+    if (!el) return;
+    const { next, counts } = getAutoAssignRecommendation();
+    el.textContent = next ? `\u2192 Next up: ${next} (${counts[next] || 0} today)` : "";
+  }
+
+  // Auto-assigns a freshly-appeared Unassigned listing to whoever the
+  // round-robin recommendation currently favors, when the toggle is on.
+  // Only ever fires for senior (matches assign()'s own access rule) and
+  // only once armed (see autoAssignArmed above). Reuses the exact same
+  // assign() codepath a senior clicking a popover option would hit —
+  // optimistic local update, write to the Sheet, verify-before-reverting
+  // on a flaky response — via the __dpAssign hook renderAssignCell exposes.
+  function maybeAutoAssign(ref, cell) {
+    if (!autoAssignEnabled || !autoAssignArmed) return;
+    if (ROLE !== "senior" || !MY_NAME) return;
+    if (!ref || !cell || typeof cell.__dpAssign !== "function") return;
+    const entry = assignmentCache[ref];
+    if (entry && isActiveStatus(entry.status)) return; // already spoken for
+    if (autoAssignInFlight.has(ref)) return;
+    autoAssignInFlight.add(ref);
+    // With more than one senior tab/machine watching the same board, two
+    // tabs can both notice the same brand-new Unassigned listing within
+    // the same instant and each independently decide to auto-assign it —
+    // there's no shared lock between separate browser sessions. A short
+    // randomized delay, plus a fresh eligibility check right before the
+    // write actually fires, staggers that: whichever tab's poll or DOM
+    // update reflects the other tab's assignment first will see this ref
+    // is no longer eligible and quietly back off, instead of both writing
+    // to the same ref at once. Doesn't make the race impossible (that
+    // would need a real server-side lock across tabs), but makes it very
+    // unlikely in practice, and any write that does still race is caught
+    // by the normal poll-and-converge behavior everything else here
+    // already relies on.
+    const jitterMs = 300 + Math.floor(Math.random() * 1500);
+    setTimeout(() => {
+      const fresh = assignmentCache[ref];
+      const stillEligible = !fresh || !isActiveStatus(fresh.status);
+      if (stillEligible) {
+        const { next } = getAutoAssignRecommendation();
+        if (next) cell.__dpAssign(next, { isAutoAssign: true });
+      }
+      // assign() (when it fires) is fire-and-forget from here — it already
+      // handles its own retry/revert internally. Either way, stop treating
+      // the ref as in-flight after a reasonable window so a genuinely
+      // failed+reverted auto-assign can be retried on a later pass instead
+      // of being stuck "in flight" forever.
+      setTimeout(() => autoAssignInFlight.delete(ref), 15000);
+    }, jitterMs);
+  }
+
   const PROCESS_DEBOUNCE_MS = 150;
   // Real-time mode: as fast as we can safely poll Apps Script (which is now
   // fully uncached on this endpoint — see appscript.js) without tripping its
@@ -74,6 +181,24 @@
   // persisted in chrome.storage.local so the choice sticks across page
   // loads/tabs.
   let openListingInNewTabEnabled = false;
+  // Round-robin auto-assign — see the "── Round-robin auto-assign ──"
+  // section below for the recommendation/assignment logic itself.
+  let autoAssignEnabled = false;
+  // Stays false until the very first Apps Script fetch has come back and
+  // been rendered once. Without this, turning the toggle on from a prior
+  // session (it's persisted) would, on page load, treat every listing
+  // that's been sitting Unassigned for days as "brand new" and auto-assign
+  // the entire backlog in one burst the instant the page opens. Flips to
+  // true right after that first render and stays true for the rest of the
+  // tab's life — every listing that shows up as newly-Unassigned from that
+  // point on is genuinely new.
+  let autoAssignArmed = false;
+  let autoAssignArmDone = false;
+  // Refs currently mid-flight through an auto-triggered assign() call —
+  // prevents the same ref from being auto-assigned a second time by a poll
+  // that lands while the first attempt's write (and its verify-before-
+  // reverting retries) is still in progress.
+  const autoAssignInFlight = new Set();
   let processTimer = null;
   let pollHandle = null;
   let contextDead = false;
@@ -804,16 +929,36 @@
       if (!pop) {
         pop = document.createElement("div");
         pop.className = "dp-editor-popover dp-popover";
-        EDITORS.forEach(name => {
-          const opt = document.createElement("button");
-          opt.type = "button";
-          opt.className = "dp-editor-option";
-          opt.textContent = name;
-          opt.addEventListener("click", e => { e.stopPropagation(); assign(name); pop.classList.remove("is-open"); });
-          pop.appendChild(opt);
-        });
         widget.appendChild(pop);
       }
+      // Rebuilt on every open (not just once) so the today's-count badges
+      // and the recommended star reflect whatever's happened since the
+      // popover was last opened, rather than freezing at first-render values.
+      pop.innerHTML = "";
+      const { next, counts } = getAutoAssignRecommendation();
+      EDITORS.forEach(name => {
+        const opt = document.createElement("button");
+        opt.type = "button";
+        opt.className = "dp-editor-option" + (name === next ? " is-recommended" : "");
+        if (name === next) {
+          const star = document.createElement("span");
+          star.className = "dp-editor-option-star";
+          star.textContent = "\u2605";
+          star.title = "Round-robin recommendation \u2014 fewest assigned today";
+          opt.appendChild(star);
+        }
+        const label = document.createElement("span");
+        label.className = "dp-editor-option-label";
+        label.textContent = name;
+        opt.appendChild(label);
+        const count = document.createElement("span");
+        count.className = "dp-editor-option-count";
+        count.textContent = String(counts[name] || 0);
+        count.title = "Assigned today";
+        opt.appendChild(count);
+        opt.addEventListener("click", e => { e.stopPropagation(); assign(name); pop.classList.remove("is-open"); });
+        pop.appendChild(opt);
+      });
       pop.classList.add("is-open");
     }
 
@@ -821,7 +966,16 @@
     // has to already be there; junior has no UI path to reach this for a
     // fresh Unassigned listing (see renderUnassigned), and this guard
     // keeps that true even if called directly.
-    function assign(editor) {
+    //
+    // opts.isAutoAssign marks this call as machine-triggered (round-robin
+    // auto-assign) rather than a deliberate popover click — passed through
+    // to the server so it can back off instead of overwriting if the row
+    // was genuinely claimed by someone/something else in the meantime (see
+    // the isAutoAssign check in the Apps Script's assign action). A manual
+    // call always omits it, so a senior's deliberate reassign is never
+    // second-guessed by this.
+    function assign(editor, opts) {
+      const isAutoAssign = !!(opts && opts.isAutoAssign);
       if (!ref) return;
       if (ROLE !== "senior" && ROLE !== "junior") return;
       if (!window.dpRequireName()) return;
@@ -846,10 +1000,24 @@
         const categoryOverride = isReshootJob ? "Re-shoot" : "";
         // Re-assign: clear startedAt and onHoldReason locally so the badge
         // doesn't carry stale info from the previous editor's session.
+        //
+        // assignedAt/reassignedAt are set locally here (not just left for
+        // the next server poll to fill in) specifically so
+        // getAutoAssignRecommendation() sees this assignment right away —
+        // without it, a run of several listings auto-assigned back-to-back
+        // within the same ~12s local-change-protection window (see
+        // refreshAssignments) would all look uncounted and round-robin
+        // could hand every one of them to the same editor instead of
+        // spreading them out.
+        const now = new Date().toISOString();
+        const carriedAssignedAt = (previousEntry && previousEntry.editor && previousEntry.assignedAt)
+          ? previousEntry.assignedAt : now;
         assignmentCache[ref] = { editor, status: "Assigned", title,
           onHoldReason: isReAssign ? "" : (previousEntry && previousEntry.onHoldReason) || "",
           bedrooms: (previousEntry && previousEntry.bedrooms) || "",
-          crmStatus: categoryOverride || (previousEntry && previousEntry.crmStatus) || "" };
+          crmStatus: categoryOverride || (previousEntry && previousEntry.crmStatus) || "",
+          assignedAt: carriedAssignedAt,
+          reassignedAt: isReAssign ? now : "" };
         lastLocalChangeAt[ref] = Date.now();
         cell.dataset.dpAppliedEditor = editor;
         cell.dataset.dpAppliedStatus = "Assigned";
@@ -857,7 +1025,27 @@
         applyFilters();
 
         safeSendMessage({ type: "DP_ASSIGN", ref, editor, title, reAssign: isReAssign,
-          actionBy: MY_NAME, crmStatus: categoryOverride }, resp => {
+          actionBy: MY_NAME, crmStatus: categoryOverride, isAutoAssign }, resp => {
+          // The server declined to write because this ref was already
+          // genuinely claimed (by another tab's auto-assign, or a manual
+          // assign that landed first) by the time our request got its turn
+          // under the Apps Script lock — our optimistic guess above was
+          // wrong. Snap straight to whatever the server says is actually
+          // true rather than waiting out the usual local-change-protection
+          // window, so the row doesn't sit showing the wrong editor for
+          // the next several seconds.
+          if (resp && resp.ok && resp.data && resp.data.skipped) {
+            const actualEditor = resp.data.editor || "";
+            const actualStatus = resp.data.status || "";
+            assignmentCache[ref] = { ...(assignmentCache[ref] || {}), editor: actualEditor, status: actualStatus };
+            lastLocalChangeAt[ref] = Date.now();
+            cell.dataset.dpAppliedEditor = actualEditor;
+            cell.dataset.dpAppliedStatus = actualStatus;
+            if (isActiveStatus(actualStatus)) renderAssigned(actualEditor, actualStatus);
+            else renderUnassigned();
+            applyFilters();
+            return;
+          }
           if (!(resp && resp.ok)) {
             console.log("DP assign failed", resp);
             verifyBeforeReverting(ref, "Assigned", () => {
@@ -880,6 +1068,11 @@
         });
       });
     }
+    // Exposed so maybeAutoAssign() (module-level, outside this per-cell
+    // closure) can trigger a real assign() call — same optimistic-update +
+    // write + verify-before-reverting path a manual popover click uses,
+    // just invoked programmatically instead of from a click handler.
+    cell.__dpAssign = assign;
 
 
 
@@ -1188,6 +1381,12 @@
           existingCell.dataset.dpAppliedEditor = newEditor;
           existingCell.dataset.dpAppliedStatus = newStatus;
           existingCell.__dpRenderStatus && existingCell.__dpRenderStatus();
+          // Catches the reopen-on-recategorize case (see
+          // maybeReopenOnRecategorize above): a listing that just flipped
+          // back to Unassigned after a reshoot keeps its existing cell —
+          // it never goes through the "new cell" branch below — so this is
+          // the only place that transition is visible for auto-assign too.
+          maybeAutoAssign(ref, existingCell);
         }
         // Independent of the change-check above — expanding an already-
         // rendered row reveals new .preview-body-wrap cards via a DOM
@@ -1213,10 +1412,12 @@
       // Re-run now that the cell is actually in the DOM so first-load rows
       // get styled immediately, not just after a later status change.
       newCell.__dpRenderStatus && newCell.__dpRenderStatus();
+      maybeAutoAssign(ref, newCell);
     });
 
     if (currentSort === "asc" || currentSort === "desc") applySort();
     applyFilters();
+    updateAutoAssignIndicator();
   }
 
   // ── Sort ─────────────────────────────────────────────────────────────────
@@ -1443,6 +1644,44 @@
     autoDriveSection.appendChild(autoDriveLabel);
     bar.appendChild(autoDriveSection);
 
+    // Round-robin auto-assign toggle + "who's next" recommendation.
+    // Senior-only, same as the Assign button itself — juniors have no
+    // assign() access, so there's nothing for this to trigger for them.
+    // The "Next up" readout is shown whenever this section renders, whether
+    // or not the toggle itself is on — the recommendation is useful on its
+    // own for manually picking who's next, independent of whether it's
+    // being applied automatically.
+    if (ROLE === "senior") {
+      const autoAssignSection = document.createElement("div");
+      autoAssignSection.className = "dp-filter-section";
+      autoAssignSection.appendChild(Object.assign(document.createElement("span"), {
+        className: "dp-filter-label", textContent: "Auto-assign:"
+      }));
+      const autoAssignLabel = document.createElement("label");
+      autoAssignLabel.className = "dp-toggle-wrap";
+      autoAssignLabel.title = "When on, new Unassigned listings are assigned automatically in round-robin order so today's requests end up spread evenly across the team";
+      const autoAssignInput = document.createElement("input");
+      autoAssignInput.type = "checkbox";
+      autoAssignInput.className = "dp-toggle-input";
+      autoAssignInput.checked = autoAssignEnabled;
+      autoAssignInput.addEventListener("change", () => {
+        autoAssignEnabled = autoAssignInput.checked;
+        try { chrome.storage.local.set({ dpAutoAssignEnabled: autoAssignEnabled }); } catch (e) {}
+        updateAutoAssignIndicator();
+      });
+      const autoAssignSlider = document.createElement("span");
+      autoAssignSlider.className = "dp-toggle-slider";
+      autoAssignLabel.appendChild(autoAssignInput);
+      autoAssignLabel.appendChild(autoAssignSlider);
+      autoAssignSection.appendChild(autoAssignLabel);
+
+      const autoAssignIndicator = document.createElement("span");
+      autoAssignIndicator.className = "dp-auto-assign-indicator";
+      autoAssignSection.appendChild(autoAssignIndicator);
+
+      bar.appendChild(autoAssignSection);
+    }
+
     // Clear + counter + dashboard
     const toolsSection = document.createElement("div");
     toolsSection.className = "dp-filter-section dp-filter-tools";
@@ -1470,6 +1709,7 @@
     parent.insertBefore(bar, anchor);
     filterBarInjected = true;
     applyFilters();
+    updateAutoAssignIndicator();
   }
 
   // ── Refresh from sheet ───────────────────────────────────────────────────
@@ -1534,6 +1774,12 @@
         assignmentCache = mergedAssign;
         downloadedCache = mergedDownloaded;
         processRows();
+        // Arm auto-assign only AFTER this pass has rendered — so if the
+        // toggle was already on from a previous session, this first pass
+        // (which can contain a whole backlog of long-Unassigned listings)
+        // is exempt, and only listings that appear from here on are
+        // treated as "new" and eligible for auto-assignment.
+        if (!autoAssignArmDone) { autoAssignArmDone = true; autoAssignArmed = true; }
 
         // Persist for next page load — see the init block's hydration
         // step below for why. chrome.storage.local's quota/write-rate is
@@ -3103,11 +3349,16 @@
   }), 800);
 
   // ── Init (reads role + name from storage before starting) ───────────────
-  chrome.storage.local.get(["role", "myName", "dpAssignSnapshot", "dpOpenListingNewTab"], result => {
+  chrome.storage.local.get(["role", "myName", "dpAssignSnapshot", "dpOpenListingNewTab", "dpAutoAssignEnabled"], result => {
     ROLE = (result && result.role) || "senior";
     MY_NAME = (result && result.myName) || "";
     // Default OFF — only on if explicitly turned on before.
     openListingInNewTabEnabled = !!(result && result.dpOpenListingNewTab === true);
+    // Default OFF here too — auto-assign only ever runs because someone
+    // deliberately flipped the toggle (see autoAssignArmed above for why a
+    // toggle that was already on from a prior session still can't sweep an
+    // existing backlog the instant this page loads).
+    autoAssignEnabled = !!(result && result.dpAutoAssignEnabled === true);
 
     // Hydrate from the last-known snapshot (saved after every successful
     // refresh — see refreshAssignments) BEFORE the first render pass runs.
