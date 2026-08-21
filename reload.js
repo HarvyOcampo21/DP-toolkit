@@ -113,6 +113,9 @@ const CHANGELOG = [
       { version: 56, notes: [
     "Auto-assign now always starts OFF on every fresh page load or refresh \u2014 it no longer remembers being left on from a previous session, so it always has to be turned on by hand.",
   ]},
+      { version: 57, notes: [
+    "Fixed auto-assign silently skipping eligible Unassigned listings that just sat there without ever getting picked up \u2014 it was only ever retrying a listing when its status changed, so one missed attempt (e.g. right as the tab was still loading) meant it was never tried again. It now keeps checking every eligible listing on every refresh until it's actually assigned.",
+  ]},
 ];
 
 const card = document.getElementById("card");

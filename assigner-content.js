@@ -1401,13 +1401,18 @@
           existingCell.dataset.dpAppliedEditor = newEditor;
           existingCell.dataset.dpAppliedStatus = newStatus;
           existingCell.__dpRenderStatus && existingCell.__dpRenderStatus();
-          // Catches the reopen-on-recategorize case (see
-          // maybeReopenOnRecategorize above): a listing that just flipped
-          // back to Unassigned after a reshoot keeps its existing cell —
-          // it never goes through the "new cell" branch below — so this is
-          // the only place that transition is visible for auto-assign too.
-          maybeAutoAssign(ref, existingCell, crmStatus);
         }
+        // Called every pass, NOT just inside the change-check above. A
+        // listing that's still sitting Unassigned+eligible doesn't produce
+        // any editor/status change poll to poll, so gating this on "did
+        // something change" meant a listing that missed its one shot (e.g.
+        // the very first pass landed before auto-assign was armed, or the
+        // toggle got turned on after this row already existed) would just
+        // sit there forever without ever being retried. maybeAutoAssign
+        // already no-ops cheaply via autoAssignInFlight/eligibility checks
+        // for every row that doesn't need it, so calling it unconditionally
+        // here is safe.
+        maybeAutoAssign(ref, existingCell, crmStatus);
         // Independent of the change-check above — expanding an already-
         // rendered row reveals new .preview-body-wrap cards via a DOM
         // mutation, not a status change, so it wouldn't otherwise trigger
