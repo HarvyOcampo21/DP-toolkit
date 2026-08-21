@@ -112,7 +112,6 @@ const CHANGELOG = [
   ]},
       { version: 56, notes: [
     "Auto-assign now always starts OFF on every fresh page load or refresh \u2014 it no longer remembers being left on from a previous session, so it always has to be turned on by hand.",
-    "Even when turned on, auto-assign now waits for the CRM's own listings to fully finish loading (which can take a few seconds up to about a minute) before it will assign anything \u2014 the filter bar shows \u201cPreparing\u2026\u201d during that wait.",
   ]},
 ];
 
