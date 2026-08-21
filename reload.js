@@ -107,6 +107,9 @@ const CHANGELOG = [
       { version: 54, notes: [
     "Listings assigned by the round-robin auto-assigner now show \u201cAuto-assign (Name)\u201d as the Assigned By, instead of just the picking senior's name \u2014 so Time History makes it clear the system assigned it automatically, while still showing whose device it ran on. Manual assigns/reassigns are unchanged.",
   ]},
+      { version: 55, notes: [
+    "Auto-assign now only fires while the CRM's own status still shows Upload Pending, Offplan Pending, Photos For QC, or Stock Photos For QC \u2014 previously it could pick up other rows too. Manual assigning/reassigning is unaffected.",
+  ]},
 ];
 
 const card = document.getElementById("card");

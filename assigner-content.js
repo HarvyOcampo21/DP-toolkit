@@ -18,6 +18,15 @@
   // in for good and the dashboard ignores everything else (Pending,
   // Scheduled, Completed, etc.) for tracking purposes.
   const CATEGORY_OPTIONS = ["Offplan Pending", "Photos For QC", "Stock Photos For QC", "Upload Pending", "Re-shoot"];
+  // Auto-assign is only allowed to fire while the CRM's own live status pill
+  // still shows one of these 4 — the genuine "fresh work just landed" states.
+  // Deliberately narrower than CATEGORY_OPTIONS: "Re-shoot" is excluded here
+  // because that's a derived/internal category assign() itself applies when
+  // the CRM shows Completed (see assign()'s own comment on that), not a live
+  // CRM status a listing actually sits in — auto-assigning off of it would
+  // mean auto-assigning listings the CRM currently shows as Completed, which
+  // is exactly the kind of stale/unrelated row this guard exists to exclude.
+  const AUTO_ASSIGN_ELIGIBLE_STATUSES = ["Upload Pending", "Offplan Pending", "Photos For QC", "Stock Photos For QC"];
   const BED_BUCKETS = ["0", "1", "2", "3", "4", "5+", "?"];
   const UNASSIGNED_KEY = "";
 
@@ -116,10 +125,11 @@
   // assign() codepath a senior clicking a popover option would hit —
   // optimistic local update, write to the Sheet, verify-before-reverting
   // on a flaky response — via the __dpAssign hook renderAssignCell exposes.
-  function maybeAutoAssign(ref, cell) {
+  function maybeAutoAssign(ref, cell, crmStatus) {
     if (!autoAssignEnabled || !autoAssignArmed) return;
     if (ROLE !== "senior" || !MY_NAME) return;
     if (!ref || !cell || typeof cell.__dpAssign !== "function") return;
+    if (!AUTO_ASSIGN_ELIGIBLE_STATUSES.includes(crmStatus)) return; // not fresh incoming work
     const entry = assignmentCache[ref];
     if (entry && isActiveStatus(entry.status)) return; // already spoken for
     if (autoAssignInFlight.has(ref)) return;
@@ -141,7 +151,14 @@
     setTimeout(() => {
       const fresh = assignmentCache[ref];
       const stillEligible = !fresh || !isActiveStatus(fresh.status);
-      if (stillEligible) {
+      // Re-check the CRM status guard too, not just at call time — the
+      // jitter delay above means the row's live status could have moved on
+      // (e.g. someone actioned it manually, or it fell out of the tracked
+      // categories) in the time between when this was first noticed and
+      // when the write is actually about to fire.
+      const parentRow = cell.closest(".table-row.accordion");
+      const liveCrmStatus = (parentRow && parentRow.dataset.dpCrmStatus) || crmStatus;
+      if (stillEligible && AUTO_ASSIGN_ELIGIBLE_STATUSES.includes(liveCrmStatus)) {
         const { next } = getAutoAssignRecommendation();
         if (next) cell.__dpAssign(next, { isAutoAssign: true });
       }
@@ -1386,7 +1403,7 @@
           // back to Unassigned after a reshoot keeps its existing cell —
           // it never goes through the "new cell" branch below — so this is
           // the only place that transition is visible for auto-assign too.
-          maybeAutoAssign(ref, existingCell);
+          maybeAutoAssign(ref, existingCell, crmStatus);
         }
         // Independent of the change-check above — expanding an already-
         // rendered row reveals new .preview-body-wrap cards via a DOM
@@ -1412,7 +1429,7 @@
       // Re-run now that the cell is actually in the DOM so first-load rows
       // get styled immediately, not just after a later status change.
       newCell.__dpRenderStatus && newCell.__dpRenderStatus();
-      maybeAutoAssign(ref, newCell);
+      maybeAutoAssign(ref, newCell, crmStatus);
     });
 
     if (currentSort === "asc" || currentSort === "desc") applySort();
