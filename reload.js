@@ -131,6 +131,11 @@ const CHANGELOG = [
       { version: 62, notes: [
     "Fixed auto-reopen recreating the same Unassigned listing over and over even after deleting it from the sheet by hand \u2014 if the CRM's live category kept reading differently from what was on file, it would just keep reopening indefinitely with no memory that it had already done so. It now remembers, permanently, so deleting it for good actually sticks.",
   ]},
+      { version: 63, notes: [
+    "Cleaned up the filter bar \u2014 Bedrooms is now a plain borderless button that reveals the same filter chips on hover, instead of always taking up space in the row.",
+    "Open in new tab, Auto-assign, and On duty are now tucked behind a single \u2699 settings icon that opens on hover, instead of each having their own permanent spot in the bar.",
+    "Both have smooth open/close animations, and both also open on keyboard focus \u2014 not hover-only.",
+  ]},
 ];
 
 const card = document.getElementById("card");
