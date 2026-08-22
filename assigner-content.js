@@ -1615,7 +1615,7 @@
       /* Bedroom filter — expands horizontally in place, matching the
          original always-visible chip row's own look exactly. */
       .dp-bedroom-hover-panel {
-        display: flex; align-items: center; gap: 6px;
+        display: flex; flex-wrap: nowrap; align-items: center; gap: 6px;
         max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap;
         transition: max-width .28s ease, opacity .2s ease .04s, margin-left .28s ease;
         margin-left: 0;
