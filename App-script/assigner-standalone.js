@@ -583,6 +583,49 @@ function assignerDoPost_impl(p) {
     return jsonResponse({ ref: p.ref, reopened: true, category: newCategory });
   }
 
+  // ── restartRejected ─────────────────────────────────────────────────────
+  // Manual counterpart to reopenOnCategoryChange, triggered by a person
+  // clicking "Restart" on a Rejected listing rather than the CRM's category
+  // genuinely advancing on its own. Same "append a brand-new row, old row
+  // untouched" shape (so this rework cycle is tracked as its own entry,
+  // same as the automatic path) — but unlike that automatic path, this
+  // assigns the new row straight back to whoever had it before instead of
+  // leaving it Unassigned. A deliberate click on Restart means "put this
+  // back with the same person to redo," not "new work just arrived, up
+  // for grabs" — so it goes to Assigned, never all the way to In Progress;
+  // the editor still has to hit Start themselves once they actually pick
+  // it back up.
+  if (p.action === "restartRejected") {
+    if (ri === -1) return jsonResponse({ ref: p.ref, restarted: false, error: "No existing row" });
+    const prevStatus = ex(ASSIGNER_COL.STATUS);
+    if (prevStatus !== "Rejected") return jsonResponse({ ref: p.ref, restarted: false, error: "Not currently Rejected" });
+
+    const prevEditor = ex(ASSIGNER_COL.EDITOR);
+    if (!prevEditor) return jsonResponse({ ref: p.ref, restarted: false, error: "No prior editor on file" });
+
+    const restartedByLabel = `Restarted (${p.actionBy || "unknown"})`;
+    let historyJson = ex(ASSIGNER_COL.HISTORY); // old row's history, carried forward as the new row's starting point
+    historyJson = appendHistory(historyJson, {
+      type: "restarted", ts: now.toISOString(), editor: prevEditor, by: p.actionBy || "",
+    });
+    historyJson = appendHistory(historyJson, {
+      type: "assigned", ts: now.toISOString(), editor: prevEditor, by: restartedByLabel,
+    });
+
+    sheet.appendRow(fullRow({
+      editor: prevEditor, status: "Assigned",
+      assignedAt: now, updatedAt: now, unassignedAt: "",
+      startedAt: "", completedAt: "", rejectedAt: "",
+      onHoldAt: "", onHoldReason: "",
+      assignedBy: restartedByLabel,
+      reassignedFrom: "", reassignedTo: "", reassignedBy: "", reassignedAt: "",
+      downloaded: false, downloadedAt: "",
+      title: p.title || ex(ASSIGNER_COL.TITLE),
+      history: historyJson,
+    }));
+    return jsonResponse({ ref: p.ref, restarted: true, editor: prevEditor });
+  }
+
   // ── assign (and re-assign) ────────────────────────────────────────────
   const editor     = p.editor  || "";
   const title      = p.title   || "";

@@ -924,15 +924,20 @@
         widget.appendChild(startBtn);
       }
 
-      // Restart button on Rejected listings — reopens the listing by moving
-      // it straight to In Progress, same as clicking Start elsewhere.
+      // Restart button on Rejected listings — reopens the listing as a
+      // fresh cycle (new row on the sheet, so this rework is tracked and
+      // counted separately, same as the automatic recategorize-reopen
+      // path) and hands it straight back to the same editor who had it,
+      // as Assigned — NOT In Progress; the editor still clicks Start
+      // themselves once they actually pick it back up. See
+      // restartRejected() below.
       if ((ROLE === "senior" || ROLE === "junior") && isRejected) {
         const restartBtn = document.createElement("button");
         restartBtn.type = "button";
         restartBtn.className = "dp-start-btn";
         restartBtn.textContent = "Restart";
-        restartBtn.title = "Reopen this listing and mark it In Progress";
-        restartBtn.addEventListener("click", e => { e.stopPropagation(); markInProgress(); });
+        restartBtn.title = "Reopen this listing as a new cycle and reassign it back to the same editor";
+        restartBtn.addEventListener("click", e => { e.stopPropagation(); restartRejected(); });
         widget.appendChild(restartBtn);
       }
 
@@ -1198,6 +1203,62 @@
       });
     }
 
+    // Both roles can restart a Rejected listing — matches markInProgress's
+    // own access rule just above. Unlike markInProgress, this creates a
+    // brand-new row server-side (restartRejected — see Apps Script) rather
+    // than editing the existing one, so the response doesn't hand back an
+    // updated version of what's already in assignmentCache; the whole new
+    // entry has to be built locally from scratch, then verified against
+    // whatever the server says the LATEST row for this ref now looks like
+    // (verifyBeforeReverting already always checks the last-appended row
+    // per ref, which is exactly the new row this creates).
+    function restartRejected() {
+      if (!ref) return;
+      if (!window.dpRequireName()) return;
+      const previousEntry = assignmentCache[ref] || null;
+      const editorToRestartTo = previousEntry && previousEntry.editor;
+      if (!editorToRestartTo) {
+        console.log("DP restart: no prior editor on file for", ref, "— nothing to restart to");
+        return;
+      }
+      preserveScrollAround(() => {
+        const now = new Date().toISOString();
+        assignmentCache[ref] = {
+          ...previousEntry, editor: editorToRestartTo, status: "Assigned",
+          assignedAt: now, assignedBy: `Restarted (${MY_NAME})`,
+          startedAt: "", completedAt: "", rejectedAt: "",
+          onHoldAt: "", onHoldReason: "", downloadedAt: "",
+        };
+        delete downloadedCache[ref];
+        lastLocalChangeAt[ref] = Date.now();
+        cell.dataset.dpAppliedEditor = editorToRestartTo;
+        cell.dataset.dpAppliedStatus = "Assigned";
+        renderAssigned(editorToRestartTo, "Assigned");
+        applyFilters();
+
+        safeSendMessage({ type: "DP_RESTART_REJECTED", ref, title, actionBy: MY_NAME }, resp => {
+          if (!(resp && resp.ok && resp.data && resp.data.restarted)) {
+            console.log("DP restart failed", resp);
+            verifyBeforeReverting(ref, m => m.status === "Assigned" && m.editor === editorToRestartTo, () => {
+              if (previousEntry) {
+                assignmentCache[ref] = previousEntry;
+                cell.dataset.dpAppliedEditor = previousEntry.editor || "";
+                cell.dataset.dpAppliedStatus = previousEntry.status || "";
+                if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
+                else renderUnassigned();
+              } else {
+                delete assignmentCache[ref];
+                cell.dataset.dpAppliedEditor = "";
+                cell.dataset.dpAppliedStatus = "";
+                renderUnassigned();
+              }
+              lastLocalChangeAt[ref] = Date.now();
+              applyFilters();
+            }, "Could not restart this listing — reverted.");
+          }
+        });
+      });
+    }
 
 
     // Senior only — put a listing on hold with a reason.

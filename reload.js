@@ -122,6 +122,9 @@ const CHANGELOG = [
       { version: 59, notes: [
     "Added an \u201cOn duty\u201d picker next to Auto-assign, for seniors \u2014 choose exactly which editors the auto-assigner is allowed to hand new listings to. Only checked editors are ever picked, so on a day where only some of the team is working (or someone's out sick or on leave), auto-assign will only spread work across whoever's actually checked \u2014 no need to touch this at all on a normal day where everyone's in.",
   ]},
+      { version: 60, notes: [
+    "Restart (on a Rejected listing) now opens it as a proper new cycle \u2014 tracked as its own entry, same as a reshoot coming back automatically \u2014 and hands it straight back to the same editor who had it, ready to go as Assigned. It no longer jumps straight to In Progress; the editor still hits Start themselves once they actually pick it back up.",
+  ]},
 ];
 
 const card = document.getElementById("card");

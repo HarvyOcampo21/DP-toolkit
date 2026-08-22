@@ -191,7 +191,7 @@ const ASSIGNER_MESSAGE_TYPES = new Set([
   "DP_MARK_COMPLETED", "DP_MARK_REJECTED", "DP_SET_ON_HOLD",
   "DP_SET_DOWNLOADED", "DP_SYNC_META", "DP_OPEN_DRIVE_SEARCH",
   "DP_REOPEN_ON_RECATEGORIZE", "DP_OPEN_LISTING_NEW_TAB",
-  "DP_SET_AUTO_ASSIGN_ELIGIBILITY",
+  "DP_SET_AUTO_ASSIGN_ELIGIBILITY", "DP_RESTART_REJECTED",
 ]);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -306,6 +306,7 @@ const ASSIGNER_WRITE_TYPES = new Set([
   "DP_ASSIGN", "DP_UNASSIGN", "DP_MARK_INPROGRESS", "DP_MARK_COMPLETED",
   "DP_MARK_REJECTED", "DP_SET_ON_HOLD", "DP_SET_DOWNLOADED", "DP_SYNC_META",
   "DP_REOPEN_ON_RECATEGORIZE", "DP_SET_AUTO_ASSIGN_ELIGIBILITY",
+  "DP_RESTART_REJECTED",
 ]);
 
 // Defense-in-depth: the content script already blocks these actions client
@@ -395,6 +396,16 @@ function dispatchAssignerMessage(message, sendResponse) {
   if (message.type === "DP_REOPEN_ON_RECATEGORIZE") {
     postToAssignerSheet({ action: "reopenOnCategoryChange", ref: message.ref,
       newCategory: message.newCategory || "", title: message.title || "" }, sendResponse);
+    return true;
+  }
+
+  // Manual "Restart" click on a Rejected listing — see the matching Apps
+  // Script action for how this differs from the automatic reopen above
+  // (this one reassigns straight back to the same editor as Assigned,
+  // rather than leaving it Unassigned for anyone to pick up).
+  if (message.type === "DP_RESTART_REJECTED") {
+    postToAssignerSheet({ action: "restartRejected", ref: message.ref,
+      title: message.title || "", actionBy: message.actionBy || "" }, sendResponse);
     return true;
   }
 
