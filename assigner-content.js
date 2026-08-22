@@ -1612,42 +1612,26 @@
       .dp-hover-trigger-caret { display: inline-block; transition: transform .2s ease; font-size: 10px; }
       .dp-hover-reveal.is-open .dp-hover-trigger-caret { transform: rotate(180deg); }
 
-      /* Bedroom filter — expands horizontally in place, matching the
-         original always-visible chip row's own look exactly. */
-      .dp-bedroom-hover-panel {
+      /* Generic hover-slide panel — used by every trigger in the bar
+         (Bedrooms, Sort, Editor, Status, Configuration). Expands
+         horizontally in place next to its trigger; collapsed it's clipped
+         to zero width. flex-wrap is forced to nowrap even while collapsed
+         — without it, a wrapping child list (e.g. the bedroom chips, which
+         also carry .dp-chip-wrap's flex-wrap:wrap) would stack into
+         multiple rows at max-width:0 and silently reserve that stacked
+         height even though nothing is visible. overflow only switches to
+         visible once open, so a nested absolute-positioned dropdown
+         (Editor/Status/On duty popovers) isn't clipped by this wrapper. */
+      .dp-hover-slide-panel {
         display: flex; flex-wrap: nowrap; align-items: center; gap: 6px;
         max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap;
         transition: max-width .28s ease, opacity .2s ease .04s, margin-left .28s ease;
         margin-left: 0;
       }
-      .dp-hover-reveal.is-open .dp-bedroom-hover-panel {
-        max-width: 480px; opacity: 1; margin-left: 8px;
+      .dp-hover-reveal.is-open .dp-hover-slide-panel {
+        max-width: 900px; opacity: 1; margin-left: 8px; overflow: visible;
       }
-
-      /* Settings gear — floats as a small card, doesn't reflow the bar. */
-      .dp-settings-gear-btn {
-        background: none; border: none; color: #9ca3af; cursor: pointer;
-        border-radius: 6px;
-        display: flex; align-items: center; justify-content: center;
-        transition: color .15s ease, transform .4s ease;
-      }
-      .dp-settings-gear-btn:hover { color: #e5e7eb; }
-      .dp-hover-reveal.is-open .dp-settings-gear-btn { color: #60a5fa; transform: rotate(75deg); }
-      .dp-settings-panel {
-        position: absolute; top: 100%; right: 0; margin-top: 6px; z-index: 40;
-        display: flex; flex-direction: column; gap: 10px;
-        background: #1c2130; border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 10px; padding: 12px 14px; min-width: 240px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-        opacity: 0; visibility: hidden; transform: translateY(-6px) scale(0.98);
-        transform-origin: top right;
-        transition: opacity .18s ease, transform .18s ease, visibility 0s linear .18s;
-      }
-      .dp-hover-reveal.is-open .dp-settings-panel {
-        opacity: 1; visibility: visible; transform: translateY(0) scale(1);
-        transition: opacity .18s ease, transform .18s ease, visibility 0s;
-      }
-      .dp-settings-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .dp-settings-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
       .dp-settings-row .dp-filter-label { white-space: nowrap; }
     `;
     document.head.appendChild(style);
@@ -1699,6 +1683,35 @@
     return chip;
   }
 
+  // Builds one trigger/panel pair for the filter bar: a small borderless
+  // button (defaultText + caret) that, on hover, slides a panel open to
+  // its right. Callers append whatever controls belong to that filter
+  // into the returned .panel, and can call .setLabel() afterwards to
+  // reflect the current selection on the trigger itself (as Bedrooms
+  // does). Wraps wireHoverReveal so callers don't repeat that wiring for
+  // every section.
+  function makeHoverTrigger(defaultText) {
+    const section = document.createElement("div");
+    section.className = "dp-filter-section";
+    const wrap = document.createElement("div");
+    wrap.className = "dp-hover-reveal";
+    wrap.tabIndex = 0;
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "dp-hover-trigger-btn";
+    function setLabel(text) {
+      trigger.innerHTML = `${text} <span class="dp-hover-trigger-caret">\u25BE</span>`;
+    }
+    setLabel(defaultText);
+    const panel = document.createElement("div");
+    panel.className = "dp-hover-slide-panel";
+    wrap.appendChild(trigger);
+    wrap.appendChild(panel);
+    wireHoverReveal(wrap);
+    section.appendChild(wrap);
+    return { section, wrap, trigger, panel, setLabel };
+  }
+
   function ensureFilterBar() {
     if (filterBarInjected && document.querySelector(".dp-filter-bar")) return;
     const rows = getAllRows();
@@ -1714,37 +1727,23 @@
     // Bedroom chips — borderless trigger, hover reveals the same chip row
     // as before, just hidden until hovered so it doesn't take up space in
     // the bar the rest of the time.
-    const bedSection = document.createElement("div");
-    bedSection.className = "dp-filter-section";
-    const bedHoverWrap = document.createElement("div");
-    bedHoverWrap.className = "dp-hover-reveal";
-    bedHoverWrap.tabIndex = 0;
-    const bedTriggerBtn = document.createElement("button");
-    bedTriggerBtn.type = "button";
-    bedTriggerBtn.className = "dp-hover-trigger-btn";
-    bedTriggerBtn.innerHTML = `Bedrooms <span class="dp-hover-trigger-caret">\u25BE</span>`;
-    const bedChipsWrap = document.createElement("div");
-    bedChipsWrap.className = "dp-chip-wrap dp-bedroom-hover-panel";
-    ["0","1","2","3","4","5+"].forEach(v => buildChip(bedChipsWrap, v, bedroomChipLabel(v), selectedBedroomFilters));
+    const bed = makeHoverTrigger("Bedrooms");
+    bed.panel.classList.add("dp-chip-wrap"); // chip-specific spacing/wrap rules
+    ["0","1","2","3","4","5+"].forEach(v => buildChip(bed.panel, v, bedroomChipLabel(v), selectedBedroomFilters));
     function updateBedTriggerLabel() {
-      const activeLabels = Array.from(bedChipsWrap.querySelectorAll(".dp-chip.is-active")).map(c => c.textContent);
-      bedTriggerBtn.innerHTML = (activeLabels.length ? `Bedrooms: ${activeLabels.join(", ")}` : "Bedrooms")
-        + ` <span class="dp-hover-trigger-caret">\u25BE</span>`;
+      const activeLabels = Array.from(bed.panel.querySelectorAll(".dp-chip.is-active")).map(c => c.textContent);
+      bed.setLabel(activeLabels.length ? `Bedrooms: ${activeLabels.join(", ")}` : "Bedrooms");
     }
-    bedChipsWrap.addEventListener("click", updateBedTriggerLabel);
+    bed.panel.addEventListener("click", updateBedTriggerLabel);
     updateBedTriggerLabel();
-    bedHoverWrap.appendChild(bedTriggerBtn);
-    bedHoverWrap.appendChild(bedChipsWrap);
-    wireHoverReveal(bedHoverWrap);
-    bedSection.appendChild(bedHoverWrap);
-    bar.appendChild(bedSection);
+    bar.appendChild(bed.section);
 
-    // Sort
-    const sortSection = document.createElement("div");
-    sortSection.className = "dp-filter-section";
-    sortSection.appendChild(Object.assign(document.createElement("span"), {
-      className: "dp-filter-label", textContent: "Sort:"
-    }));
+    // Sort — trigger reveals the asc/desc buttons, same hover-slide as
+    // every other filter now.
+    const sortHT = makeHoverTrigger("Sort");
+    function refreshSortTriggerLabel() {
+      sortHT.setLabel(currentSort === "asc" ? "Sort: 0\u21925+" : currentSort === "desc" ? "Sort: 5+\u21920" : "Sort");
+    }
     const sortWrap = document.createElement("div");
     sortWrap.className = "dp-sort-wrap";
     const ascBtn = Object.assign(document.createElement("button"), { type:"button", className:"dp-sort-btn", textContent:"0 \u2192 5+" });
@@ -1752,27 +1751,27 @@
     function refreshSortState() {
       ascBtn.classList.toggle("is-active", currentSort === "asc");
       descBtn.classList.toggle("is-active", currentSort === "desc");
+      refreshSortTriggerLabel();
     }
     ascBtn.addEventListener("click", () => { currentSort = currentSort === "asc" ? null : "asc"; refreshSortState(); applySort(); });
     descBtn.addEventListener("click", () => { currentSort = currentSort === "desc" ? null : "desc"; refreshSortState(); applySort(); });
     sortWrap.appendChild(ascBtn); sortWrap.appendChild(descBtn);
-    sortSection.appendChild(sortWrap);
-    bar.appendChild(sortSection);
+    sortHT.panel.appendChild(sortWrap);
+    bar.appendChild(sortHT.section);
 
-    // Editor dropdown
-    const editorSection = document.createElement("div");
-    editorSection.className = "dp-filter-section";
-    editorSection.appendChild(Object.assign(document.createElement("span"), {
-      className: "dp-filter-label", textContent: "Editor:"
-    }));
+    // Editor dropdown — trigger reveals the "All editors ▾" button, whose
+    // own click still opens the checkbox popover as before.
+    const editorHT = makeHoverTrigger("Editor");
     const editorWrap = document.createElement("div");
     editorWrap.className = "dp-editor-filter-wrap";
     const editorBtn = Object.assign(document.createElement("button"), { type:"button", className:"dp-editor-filter-btn" });
     const editorPop = document.createElement("div");
     editorPop.className = "dp-editor-filter-popover dp-popover";
     function updateEditorBtnLabel() {
-      editorBtn.textContent = selectedEditorFilters.size === 0 ? "All editors \u25BE" :
-        Array.from(selectedEditorFilters).map(v => v === UNASSIGNED_KEY ? "Unassigned" : v).join(", ") + " \u25BE";
+      const summary = selectedEditorFilters.size === 0 ? "" :
+        Array.from(selectedEditorFilters).map(v => v === UNASSIGNED_KEY ? "Unassigned" : v).join(", ");
+      editorBtn.textContent = (summary || "All editors") + " \u25BE";
+      editorHT.setLabel(summary ? `Editor: ${summary}` : "Editor");
     }
     function buildEditorOpt(value, labelText) {
       const optLabel = document.createElement("label");
@@ -1798,23 +1797,20 @@
     });
     editorPop.addEventListener("click", e => e.stopPropagation());
     editorWrap.appendChild(editorBtn); editorWrap.appendChild(editorPop);
-    editorSection.appendChild(editorWrap);
-    bar.appendChild(editorSection);
+    editorHT.panel.appendChild(editorWrap);
+    bar.appendChild(editorHT.section);
 
-    // Status dropdown
-    const statusSection = document.createElement("div");
-    statusSection.className = "dp-filter-section";
-    statusSection.appendChild(Object.assign(document.createElement("span"), {
-      className: "dp-filter-label", textContent: "Status:"
-    }));
+    // Status dropdown — same hover-then-click pattern as Editor.
+    const statusHT = makeHoverTrigger("Status");
     const statusWrap = document.createElement("div");
     statusWrap.className = "dp-editor-filter-wrap";
     const statusBtn = Object.assign(document.createElement("button"), { type:"button", className:"dp-editor-filter-btn" });
     const statusPop = document.createElement("div");
     statusPop.className = "dp-editor-filter-popover dp-popover";
     function updateStatusBtnLabel() {
-      statusBtn.textContent = selectedStatusFilters.size === 0 ? "All statuses \u25BE" :
-        Array.from(selectedStatusFilters).join(", ") + " \u25BE";
+      const summary = selectedStatusFilters.size === 0 ? "" : Array.from(selectedStatusFilters).join(", ");
+      statusBtn.textContent = (summary || "All statuses") + " \u25BE";
+      statusHT.setLabel(summary ? `Status: ${summary}` : "Status");
     }
     function buildStatusOpt(value) {
       const optLabel = document.createElement("label");
@@ -1839,33 +1835,16 @@
     });
     statusPop.addEventListener("click", e => e.stopPropagation());
     statusWrap.appendChild(statusBtn); statusWrap.appendChild(statusPop);
-    statusSection.appendChild(statusWrap);
-    bar.appendChild(statusSection);
+    statusHT.panel.appendChild(statusWrap);
+    bar.appendChild(statusHT.section);
 
-    // Settings gear — consolidates every toggle-style configuration item
-    // (Open in new tab, Auto-assign + its "Next up" readout + On duty)
-    // behind one hover-revealed panel, instead of each permanently taking
-    // up its own slot in the bar. Vertical stacked rows here rather than
-    // the bedroom filter's horizontal expansion — this holds several
-    // unrelated settings, not one family of same-shaped chips.
-    const settingsSection = document.createElement("div");
-    settingsSection.className = "dp-filter-section";
-    const settingsHoverWrap = document.createElement("div");
-    settingsHoverWrap.className = "dp-hover-reveal";
-    settingsHoverWrap.tabIndex = 0;
-    const settingsGearBtn = document.createElement("button");
-    settingsGearBtn.type = "button";
-    settingsGearBtn.className = "dp-settings-gear-btn";
-    settingsGearBtn.title = "Configuration";
-    settingsGearBtn.textContent = "\u2699";
-    // Fallback sizing in case the post-insert measurement below can't run
-    // for some reason — overwritten with the real, exact height of the
-    // "All statuses" button once both are actually in the page.
-    settingsGearBtn.style.width = "32px";
-    settingsGearBtn.style.height = "32px";
-    settingsGearBtn.style.fontSize = "18px";
-    const settingsPanel = document.createElement("div");
-    settingsPanel.className = "dp-settings-panel";
+    // Configuration — consolidates every toggle-style setting (Open in new
+    // tab, Auto-assign + its "Next up" readout + On duty) behind one
+    // hover-revealed panel, instead of each permanently taking up its own
+    // slot in the bar. Same text-trigger + horizontal-slide pattern as
+    // every other filter now, rather than a floating icon-triggered card.
+    const configHT = makeHoverTrigger("Configuration");
+    const settingsPanel = configHT.panel;
 
     // Open-listing-in-new-tab toggle — when on, clicking a listing row
     // opens that listing in a brand-new tab (searched there by ref) and
@@ -1986,11 +1965,7 @@
       settingsPanel.appendChild(onDutyRow);
     }
 
-    settingsHoverWrap.appendChild(settingsGearBtn);
-    settingsHoverWrap.appendChild(settingsPanel);
-    wireHoverReveal(settingsHoverWrap);
-    settingsSection.appendChild(settingsHoverWrap);
-    bar.appendChild(settingsSection);
+    bar.appendChild(configHT.section);
 
     // Clear + counter + dashboard
     const toolsSection = document.createElement("div");
@@ -2021,20 +1996,6 @@
     filterBarInjected = true;
     applyFilters();
     updateAutoAssignIndicator();
-
-    // Sizes the gear icon to exactly match the "All statuses" button's
-    // real rendered height, rather than guessing a pixel value that has
-    // to be kept in sync with whatever the external stylesheet happens to
-    // use for these pill buttons. Needs a frame after insertion so
-    // statusBtn actually has layout to measure.
-    requestAnimationFrame(() => {
-      const h = statusBtn.getBoundingClientRect().height;
-      if (h > 0) {
-        settingsGearBtn.style.width = h + "px";
-        settingsGearBtn.style.height = h + "px";
-        settingsGearBtn.style.fontSize = Math.round(h * 0.55) + "px";
-      }
-    });
   }
 
   // ── Refresh from sheet ───────────────────────────────────────────────────
