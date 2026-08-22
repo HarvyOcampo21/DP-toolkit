@@ -191,6 +191,7 @@ const ASSIGNER_MESSAGE_TYPES = new Set([
   "DP_MARK_COMPLETED", "DP_MARK_REJECTED", "DP_SET_ON_HOLD",
   "DP_SET_DOWNLOADED", "DP_SYNC_META", "DP_OPEN_DRIVE_SEARCH",
   "DP_REOPEN_ON_RECATEGORIZE", "DP_OPEN_LISTING_NEW_TAB",
+  "DP_SET_AUTO_ASSIGN_ELIGIBILITY",
 ]);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -304,7 +305,7 @@ function postToAssignerSheet(body, sendResponse) {
 const ASSIGNER_WRITE_TYPES = new Set([
   "DP_ASSIGN", "DP_UNASSIGN", "DP_MARK_INPROGRESS", "DP_MARK_COMPLETED",
   "DP_MARK_REJECTED", "DP_SET_ON_HOLD", "DP_SET_DOWNLOADED", "DP_SYNC_META",
-  "DP_REOPEN_ON_RECATEGORIZE",
+  "DP_REOPEN_ON_RECATEGORIZE", "DP_SET_AUTO_ASSIGN_ELIGIBILITY",
 ]);
 
 // Defense-in-depth: the content script already blocks these actions client
@@ -376,6 +377,15 @@ function dispatchAssignerMessage(message, sendResponse) {
       status: message.status || "", bedrooms: message.bedrooms || "",
       crmStatus: message.crmStatus || "", title: message.title || "",
       listingRef: message.listingRef || "" }, sendResponse);
+    return true;
+  }
+
+  // "Who's on duty" toggle for the round-robin auto-assigner — see the
+  // matching Apps Script action for why this is separate from the rest of
+  // the assignment writes (it's per-editor config, not tied to any Ref).
+  if (message.type === "DP_SET_AUTO_ASSIGN_ELIGIBILITY") {
+    postToAssignerSheet({ action: "setAutoAssignEligibility",
+      editor: message.editor || "", eligible: !!message.eligible }, sendResponse);
     return true;
   }
 

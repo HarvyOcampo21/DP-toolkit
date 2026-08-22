@@ -116,6 +116,12 @@ const CHANGELOG = [
       { version: 57, notes: [
     "Fixed auto-assign silently skipping eligible Unassigned listings that just sat there without ever getting picked up \u2014 it was only ever retrying a listing when its status changed, so one missed attempt (e.g. right as the tab was still loading) meant it was never tried again. It now keeps checking every eligible listing on every refresh until it's actually assigned.",
   ]},
+      { version: 58, notes: [
+    "Fixed a data race that could corrupt a listing's row on the Assignments sheet when several listings were being auto-assigned close together \u2014 Editor and Status would save correctly, but Assigned Date, Assigned By, and Time History could end up blank. The two background writes involved no longer step on each other, and any row that does get created bare now gets properly filled in the moment it's actually assigned. Existing rows that already have this gap will heal themselves the next time that listing is assigned or reassigned.",
+  ]},
+      { version: 59, notes: [
+    "Added an \u201cOn duty\u201d picker next to Auto-assign, for seniors \u2014 choose exactly which editors the auto-assigner is allowed to hand new listings to. Only checked editors are ever picked, so on a day where only some of the team is working (or someone's out sick or on leave), auto-assign will only spread work across whoever's actually checked \u2014 no need to touch this at all on a normal day where everyone's in.",
+  ]},
 ];
 
 const card = document.getElementById("card");

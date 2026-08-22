@@ -19,6 +19,7 @@ var SHEET_ID = "1LgD2PXXdzJI_ryTXSgl3GPIRZSbaoF1lO4EVZtL4Ogo"; // new dedicated 
 const ASSIGNER_TOKEN = "DPPE"; // unchanged — extension/dashboard don't need updating for this
 const ASSIGNER_SHEET_NAME = "Assignments";
 const ASSIGNER_ARCHIVE_SHEET_NAME = "Assignments Archive";
+const AUTO_ASSIGN_CONFIG_SHEET_NAME = "AutoAssignConfig";
 const ASSIGNER_TRACKED_CATEGORIES = ["Offplan Pending", "Photos For QC", "Stock Photos For QC", "Upload Pending", "Re-shoot"];
 const ASSIGNER_HEADERS = [
   "Ref","Title","Editor","Status",
@@ -121,6 +122,54 @@ function getArchiveSheet() {
   return sheet;
 }
 
+// ── Auto-assign eligibility (who's on duty) ───────────────────────────────
+// Lives on its own small tab (Editor | Eligible) rather than in the same
+// row-per-listing Assignments sheet — this is per-EDITOR config, not
+// per-listing data, and changes independently (a senior flips someone off
+// duty; that has nothing to do with any particular Ref). Only ever created
+// here defensively if genuinely missing — the real one already has rows
+// for every editor, hand-maintained.
+function getAutoAssignConfigSheet() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(AUTO_ASSIGN_CONFIG_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(AUTO_ASSIGN_CONFIG_SHEET_NAME);
+    sheet.appendRow(["Editor", "Eligible"]);
+  }
+  return sheet;
+}
+
+// Reads the whole tab into { editorName: true/false }. An editor with NO
+// row at all is treated as eligible by default — this tab only needs an
+// entry for someone you want to exclude from today's rotation, not a row
+// kept in sync for every name just to stay included.
+function readAutoAssignConfig() {
+  const sheet = getAutoAssignConfigSheet();
+  const rows = sheet.getDataRange().getValues();
+  rows.shift();
+  const config = {};
+  rows.forEach(r => { if (r[0]) config[String(r[0]).trim()] = isTruthyCell(r[1]); });
+  return config;
+}
+
+// Toggles one editor's Eligible cell (or appends a new row for them if this
+// is the first time they've ever been toggled). Not tied to any Ref, so
+// this has its own small find-by-name lookup rather than reusing
+// findRowIndex (which is Ref-column-specific).
+function setAutoAssignEligibility(editorName, eligible) {
+  const name = (editorName || "").trim();
+  if (!name) return jsonResponse({ error: "Missing editor" });
+  const sheet = getAutoAssignConfigSheet();
+  const data = sheet.getDataRange().getValues();
+  let ri = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === name) { ri = i + 1; break; }
+  }
+  if (ri === -1) sheet.appendRow([name, !!eligible]);
+  else sheet.getRange(ri, 2).setValue(!!eligible);
+  return jsonResponse({ ok: true, editor: name, eligible: !!eligible });
+}
+
 function checkToken(t) { return t === ASSIGNER_TOKEN; }
 // Searches bottom-up rather than top-down — a Ref can now have more than one
 // row (see reopenOnCategoryChange, which appends a new row instead of
@@ -163,7 +212,8 @@ function getAssignerAssignments(token) {
   const sheet = getAssignerSheet();
   const rows = sheet.getDataRange().getValues();
   rows.shift();
-  const json = JSON.stringify({ assignments: rows.filter(r => r[0]).map(r => ({
+  const json = JSON.stringify({
+    assignments: rows.filter(r => r[0]).map(r => ({
     ref:             r[0],
     title:           r[1],
     editor:          r[2],
@@ -187,7 +237,12 @@ function getAssignerAssignments(token) {
     unassignedAt:    fmt(r[20]),
     history:         parseHistory(r[21]),
     listingRef:      r[22] || "",
-  }))});
+    })),
+    // Sent alongside every regular fetch (rather than needing its own
+    // separate poll) so the "who's on duty" state is always as fresh as
+    // the assignment data itself — see readAutoAssignConfig above.
+    autoAssignConfig: readAutoAssignConfig(),
+  });
 
   return ContentService
     .createTextOutput(json)
@@ -211,6 +266,13 @@ function assignerDoPost(p) {
 
 function assignerDoPost_impl(p) {
   if (!checkToken(p.token)) return jsonResponse({ error: "Unauthorized" });
+
+  // Not tied to a Ref at all (it's per-editor config), so this is handled
+  // before the "Missing ref" check just below.
+  if (p.action === "setAutoAssignEligibility") {
+    return setAutoAssignEligibility(p.editor, p.eligible);
+  }
+
   if (!p.ref) return jsonResponse({ error: "Missing ref" });
 
   const sheet = getAssignerSheet();
@@ -307,8 +369,26 @@ function assignerDoPost_impl(p) {
       if (titleChanged) overrides.title = title;
       sheet.getRange(ri, 1, 1, ASSIGNER_HEADERS.length).setValues([fullRow(overrides)]);
     } else if (p.editor || p.status) {
-      sheet.appendRow(fullRow({ ref: p.ref, title, editor: p.editor || "",
-        status: p.status || (p.editor ? "Assigned" : ""), updatedAt: now, bedrooms, crmStatus, listingRef }));
+      // Deliberately NEVER writes editor/status here, even though the
+      // client only calls syncMeta when it already believes some status
+      // exists (see the client's own guard in syncMetaIfNeeded). That
+      // belief can be based on a purely LOCAL, not-yet-confirmed
+      // optimistic update — e.g. auto-assign marks a listing "Assigned"
+      // in the client's cache the instant it's triggered, well before the
+      // server confirms it. If syncMeta's own independent request happens
+      // to reach the server first (races ahead of the real "assign"
+      // request — more likely the more listings are being auto-assigned
+      // at once), and it wrote that premature editor/status here, the
+      // real assign write that follows would see a row that already
+      // looks Assigned and back off, permanently leaving AssignedAt/
+      // AssignedBy/History blank on an otherwise-real assignment (exactly
+      // the corrupted-row symptom this was causing). Leaving editor/
+      // status out of this creation path means the worst a race can do is
+      // pre-create a bare metadata row (bedrooms/category/title/
+      // listingRef only) — the authoritative assign/hold/complete/reject
+      // action that follows is always the one to actually establish
+      // editor+status+timestamps+history, never this passive sync.
+      sheet.appendRow(fullRow({ ref: p.ref, title, updatedAt: now, bedrooms, crmStatus, listingRef }));
     }
     return jsonResponse({ ref: p.ref, synced: true });
   }
@@ -545,7 +625,19 @@ function assignerDoPost_impl(p) {
   }
 
   const isReAssign = !!(ri > -1 && prevEditor && prevEditor !== editor);
-  const isFreshStart = isReAssign || prevStatus === "Unassigned";
+  // "Fresh start" = there's no real prior assignment to build on — either
+  // this is a genuine reassign (different editor), or whatever's on file
+  // isn't an active assignment. Deliberately checked via
+  // isActiveAssignmentStatus (truthy AND not "Unassigned") rather than a
+  // literal `prevStatus === "Unassigned"` — a row can reach this point
+  // with a BLANK prevStatus too (e.g. syncMeta's metadata-only row-creation
+  // path above pre-created a bare row with no status yet), and that's just
+  // as much a fresh start as an explicit "Unassigned" is. Treating it as
+  // fresh is what makes this write self-healing: AssignedAt/AssignedBy/the
+  // "assigned" history entry all get properly populated here regardless of
+  // whether this is the very first write to touch this ref or a follow-up
+  // that lands after some other passive write already created the row.
+  const isFreshStart = isReAssign || !isActiveAssignmentStatus(prevStatus);
   const newAssignedAt = isFreshStart ? now : (ex(ASSIGNER_COL.ASSIGNED_AT) || now);
   const crmStatusOverride = ASSIGNER_TRACKED_CATEGORIES.indexOf(p.crmStatus) > -1 ? p.crmStatus : "";
 

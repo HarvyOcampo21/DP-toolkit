@@ -73,6 +73,14 @@
   function getAutoAssignRecommendation() {
     const counts = {};
     EDITORS.forEach(e => { counts[e] = 0; });
+    // Only editors currently marked eligible (see autoAssignConfig above)
+    // are candidates for the recommendation itself — someone off duty
+    // today should never be "next up" even if they happen to have the
+    // fewest assignments so far (trivially true if they have zero because
+    // they haven't worked at all). Counts are still tracked for everyone,
+    // though — the popover shows every editor's count today regardless of
+    // whether they're currently eligible.
+    const eligibleEditors = EDITORS.filter(e => autoAssignConfig[e] !== false);
     const todayStr = new Date().toDateString();
     // Track whichever counted assignment happened most recently today, so
     // ties (most commonly: everyone at 0 first thing in the morning) break
@@ -93,8 +101,9 @@
       const t = d.getTime();
       if (t >= lastPickedAt) { lastPickedAt = t; lastPicked = entry.editor; }
     });
-    const minCount = Math.min(...EDITORS.map(e => counts[e]));
-    const candidates = EDITORS.filter(e => counts[e] === minCount);
+    if (!eligibleEditors.length) return { next: null, counts };
+    const minCount = Math.min(...eligibleEditors.map(e => counts[e]));
+    const candidates = eligibleEditors.filter(e => counts[e] === minCount);
     let next = null;
     if (lastPicked) {
       const startIdx = EDITORS.indexOf(lastPicked);
@@ -111,15 +120,24 @@
   // call on every processRows() pass (a handful of object lookups over
   // assignmentCache, same cost as the recommendation itself) — no-ops
   // harmlessly if the filter bar (senior-only) isn't in the DOM.
-  // Keeps the "Next up" label in the filter bar current. Cheap enough to
-  // call on every processRows() pass (a handful of object lookups over
-  // assignmentCache, same cost as the recommendation itself) — no-ops
-  // harmlessly if the filter bar (senior-only) isn't in the DOM.
   function updateAutoAssignIndicator() {
     const el = document.querySelector(".dp-auto-assign-indicator");
     if (!el) return;
     const { next, counts } = getAutoAssignRecommendation();
-    el.textContent = next ? `\u2192 Next up: ${next} (${counts[next] || 0} today)` : "";
+    el.textContent = next ? `\u2192 Next up: ${next} (${counts[next] || 0} today)` : "\u2192 No one eligible \u2014 check On duty";
+  }
+
+  // Re-syncs the "On duty" popover's checkboxes (if it's been built yet)
+  // to match the current autoAssignConfig — called after every fetch that
+  // refreshes autoAssignConfig, so a toggle made from another tab/device
+  // shows up here too, not just on the tab that made it.
+  function syncAutoAssignEligibilityUI() {
+    document.querySelectorAll(".dp-eligibility-option").forEach(optLabel => {
+      const name = optLabel.dataset.dpEditor;
+      const cb = optLabel.querySelector("input[type=checkbox]");
+      if (name && cb) cb.checked = autoAssignConfig[name] !== false;
+    });
+    updateAutoAssignIndicator();
   }
 
   // Auto-assigns a freshly-appeared Unassigned listing to whoever the
@@ -214,6 +232,13 @@
   // that shows up as newly-Unassigned from that point on is genuinely new.
   let autoAssignArmed = false;
   let autoAssignArmDone = false;
+  // "Who's on duty" — { editorName: true/false }, sourced from the
+  // AutoAssignConfig sheet tab (see readAutoAssignConfig on the Apps
+  // Script side) and refreshed alongside every regular assignment fetch.
+  // An editor with no entry here at all defaults to eligible, matching
+  // the server's own default — see getAutoAssignRecommendation below for
+  // where this actually gets applied.
+  let autoAssignConfig = {};
   // Refs currently mid-flight through an auto-triggered assign() call —
   // prevents the same ref from being auto-assigned a second time by a poll
   // that lands while the first attempt's write (and its verify-before-
@@ -1705,6 +1730,58 @@
       autoAssignIndicator.className = "dp-auto-assign-indicator";
       autoAssignSection.appendChild(autoAssignIndicator);
 
+      // "On duty" popover — lets a senior mark specific editors eligible/
+      // ineligible for the round-robin (e.g. only 2 of the 4 are in today).
+      // Reuses the exact same wrap/btn/popover/option classes as the
+      // Editor filter dropdown above, just with a different data source
+      // and a different effect (config, not filtering).
+      const onDutyWrap = document.createElement("div");
+      onDutyWrap.className = "dp-editor-filter-wrap";
+      const onDutyBtn = Object.assign(document.createElement("button"), {
+        type: "button", className: "dp-editor-filter-btn", textContent: "On duty \u25BE"
+      });
+      onDutyBtn.title = "Choose which editors the auto-assigner is allowed to hand new listings to today";
+      const onDutyPop = document.createElement("div");
+      onDutyPop.className = "dp-editor-filter-popover dp-popover";
+      EDITORS.forEach(name => {
+        const optLabel = document.createElement("label");
+        optLabel.className = "dp-editor-filter-option dp-eligibility-option";
+        optLabel.dataset.dpEditor = name;
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = autoAssignConfig[name] !== false;
+        cb.addEventListener("change", () => {
+          const eligible = cb.checked;
+          // Optimistic — flip locally right away so the popover and the
+          // "Next up" readout feel instant, same pattern as every other
+          // write in this file. Reverts itself if the server comes back
+          // with anything other than success.
+          const previous = autoAssignConfig[name] !== false;
+          autoAssignConfig = { ...autoAssignConfig, [name]: eligible };
+          updateAutoAssignIndicator();
+          safeSendMessage({ type: "DP_SET_AUTO_ASSIGN_ELIGIBILITY", editor: name, eligible }, resp => {
+            if (!(resp && resp.ok)) {
+              console.log("DP on-duty toggle failed, reverting", resp);
+              cb.checked = previous;
+              autoAssignConfig = { ...autoAssignConfig, [name]: previous };
+              updateAutoAssignIndicator();
+            }
+          });
+        });
+        const sp = document.createElement("span"); sp.textContent = name;
+        optLabel.appendChild(cb); optLabel.appendChild(sp);
+        onDutyPop.appendChild(optLabel);
+      });
+      onDutyBtn.addEventListener("click", e => {
+        e.stopPropagation();
+        const wasOpen = onDutyPop.classList.contains("is-open");
+        closeAllPopovers();
+        if (!wasOpen) onDutyPop.classList.add("is-open");
+      });
+      onDutyPop.addEventListener("click", e => e.stopPropagation());
+      onDutyWrap.appendChild(onDutyBtn); onDutyWrap.appendChild(onDutyPop);
+      autoAssignSection.appendChild(onDutyWrap);
+
       bar.appendChild(autoAssignSection);
     }
 
@@ -1799,6 +1876,14 @@
         });
         assignmentCache = mergedAssign;
         downloadedCache = mergedDownloaded;
+        // Refreshed alongside every regular fetch, not on its own separate
+        // poll — see the server-side comment on why it's bundled into the
+        // same response. Re-syncs the popover's checkboxes too, in case
+        // another tab/device toggled someone since our last fetch.
+        if (resp.data.autoAssignConfig && typeof resp.data.autoAssignConfig === "object") {
+          autoAssignConfig = resp.data.autoAssignConfig;
+          syncAutoAssignEligibilityUI();
+        }
         processRows();
         // Arm auto-assign only AFTER this pass has rendered — so if the
         // toggle was already on from a previous session, this first pass
