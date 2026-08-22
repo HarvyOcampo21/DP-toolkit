@@ -1597,6 +1597,12 @@
     style.id = "dp-hover-anim-styles";
     style.textContent = `
       .dp-hover-reveal { position: relative; display: inline-flex; align-items: center; outline: none; }
+      /* Overrides the external stylesheet's sizing for the bar, which was
+         set for the old, permanently-visible, much taller content (every
+         toggle as its own row). Now that most of that lives behind hover
+         triggers, the bar is genuinely shorter — without this override the
+         container keeps its old fixed height and leaves a dead gap. */
+      .dp-filter-bar { min-height: 0 !important; height: auto !important; }
       .dp-hover-trigger-btn {
         background: none; border: none; color: #9ca3af; cursor: pointer;
         padding: 4px 6px; font-size: 12px; display: flex; align-items: center; gap: 4px;
@@ -1621,11 +1627,11 @@
       /* Settings gear — floats as a small card, doesn't reflow the bar. */
       .dp-settings-gear-btn {
         background: none; border: none; color: #9ca3af; cursor: pointer;
-        width: 26px; height: 26px; border-radius: 6px; font-size: 15px;
+        border-radius: 6px;
         display: flex; align-items: center; justify-content: center;
-        transition: color .15s ease, background .15s ease, transform .4s ease;
+        transition: color .15s ease, transform .4s ease;
       }
-      .dp-settings-gear-btn:hover { color: #e5e7eb; background: rgba(255,255,255,0.06); }
+      .dp-settings-gear-btn:hover { color: #e5e7eb; }
       .dp-hover-reveal.is-open .dp-settings-gear-btn { color: #60a5fa; transform: rotate(75deg); }
       .dp-settings-panel {
         position: absolute; top: 100%; right: 0; margin-top: 6px; z-index: 40;
@@ -1852,6 +1858,12 @@
     settingsGearBtn.className = "dp-settings-gear-btn";
     settingsGearBtn.title = "Configuration";
     settingsGearBtn.textContent = "\u2699";
+    // Fallback sizing in case the post-insert measurement below can't run
+    // for some reason — overwritten with the real, exact height of the
+    // "All statuses" button once both are actually in the page.
+    settingsGearBtn.style.width = "32px";
+    settingsGearBtn.style.height = "32px";
+    settingsGearBtn.style.fontSize = "18px";
     const settingsPanel = document.createElement("div");
     settingsPanel.className = "dp-settings-panel";
 
@@ -2009,6 +2021,20 @@
     filterBarInjected = true;
     applyFilters();
     updateAutoAssignIndicator();
+
+    // Sizes the gear icon to exactly match the "All statuses" button's
+    // real rendered height, rather than guessing a pixel value that has
+    // to be kept in sync with whatever the external stylesheet happens to
+    // use for these pill buttons. Needs a frame after insertion so
+    // statusBtn actually has layout to measure.
+    requestAnimationFrame(() => {
+      const h = statusBtn.getBoundingClientRect().height;
+      if (h > 0) {
+        settingsGearBtn.style.width = h + "px";
+        settingsGearBtn.style.height = h + "px";
+        settingsGearBtn.style.fontSize = Math.round(h * 0.55) + "px";
+      }
+    });
   }
 
   // ── Refresh from sheet ───────────────────────────────────────────────────

@@ -136,6 +136,10 @@ const CHANGELOG = [
     "Open in new tab, Auto-assign, and On duty are now tucked behind a single \u2699 settings icon that opens on hover, instead of each having their own permanent spot in the bar.",
     "Both have smooth open/close animations, and both also open on keyboard focus \u2014 not hover-only.",
   ]},
+      { version: 64, notes: [
+    "Fixed a leftover empty gap above the filter bar from the v63 cleanup.",
+    "The \u2699 settings icon no longer shows a background box on hover, and is now sized to exactly match the height of the Editor/Status buttons next to it.",
+  ]},
 ];
 
 const card = document.getElementById("card");
