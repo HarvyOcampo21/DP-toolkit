@@ -516,13 +516,16 @@ function assignerDoPost_impl(p) {
   // Ref flips to "Unassigned", so reopenableFrom is false on every
   // subsequent check until someone acts on it again.
   //
-  // Rather than overwrite the existing row in place, the old row is left
-  // completely untouched — its final Status, every timestamp, and its
-  // History all stay frozen exactly as they were the moment it was
-  // Rejected/Completed. This is what keeps historical counts (e.g. "how
-  // many Photos For QC jobs has Sudheep completed") permanently accurate
-  // even after a listing cycles through multiple rounds of rework — each
-  // cycle is its own row, counted independently.
+  // Rather than overwrite the existing row in place, the old row's Status,
+  // every timestamp, and every other column stay frozen exactly as they
+  // were the moment it was Rejected/Completed — this is what keeps
+  // historical counts (e.g. "how many Photos For QC jobs has Sudheep
+  // completed") permanently accurate even after a listing cycles through
+  // multiple rounds of rework, each cycle its own row, counted
+  // independently. The ONE exception is its History cell, which gets a
+  // small marker appended (see the idempotency guard below) — that's
+  // display/audit data only, nothing reads it for counts, so it doesn't
+  // compromise any of the above.
   //
   // A brand-new row is appended instead: same Ref, reset to Unassigned and
   // open for anyone to pick up, Downloaded cleared (old photos belong to
@@ -548,6 +551,31 @@ function assignerDoPost_impl(p) {
       return jsonResponse({ ref: p.ref, reopened: false });
     }
 
+    // Idempotency guard — without this, the SAME reopen can refire forever.
+    // The only record that a given (old row) -> newCategory transition was
+    // already actioned lives in the History this action writes into the
+    // brand-new Unassigned row it appends — and that row is exactly the
+    // kind of thing someone might delete by hand (it's just sitting there
+    // Unassigned, easy to mistake for junk/a mistake). Once deleted, the
+    // NEXT poll sees this same frozen old row again, with the CRM's live
+    // category still reading as newCategory (nothing about deleting the
+    // child row changes what the CRM itself is showing) — so it fires
+    // again, forever, recreating the exact row that was just deleted.
+    // Fixed by also recording a lightweight marker directly onto THIS old
+    // row's own History cell (the one thing about it that's still safe to
+    // touch after the fact — Status/every timestamp/every other column
+    // stays frozen, so this can't affect any historical count) the moment
+    // a reopen actually happens, and checking for that marker before ever
+    // reopening again. This only blocks a re-fire against this SAME frozen
+    // row for this SAME target category — a later, genuinely new
+    // completed/rejected cycle for this ref is a different row entirely
+    // and reopens normally.
+    const oldHistoryEvents = parseHistory(ex(ASSIGNER_COL.HISTORY));
+    const alreadyReopenedToThis = oldHistoryEvents.some(e => e && e.type === "recategorized" && e.to === newCategory);
+    if (alreadyReopenedToThis) {
+      return jsonResponse({ ref: p.ref, reopened: false, alreadyReopened: true });
+    }
+
     const prevEditor     = ex(ASSIGNER_COL.EDITOR);
     const wasDownloaded  = isTruthyCell(ex(ASSIGNER_COL.DOWNLOADED));
     let historyJson = ex(ASSIGNER_COL.HISTORY); // old row's history, carried forward as the new row's starting point
@@ -566,6 +594,17 @@ function assignerDoPost_impl(p) {
       type: "unassigned", ts: now.toISOString(), editor: prevEditor,
       reason: "Auto-reopened — category advanced to " + newCategory + " after " + prevStatus.toLowerCase(),
     });
+
+    // Marks the OLD row with the same "recategorized" event, so the guard
+    // above can see it even after the new row below gets deleted. Written
+    // to the History cell ONLY — every other column on this row (Status,
+    // every *At timestamp, Editor, etc.) is left exactly as it was.
+    sheet.getRange(ri, ASSIGNER_COL.HISTORY).setValue(
+      appendHistory(ex(ASSIGNER_COL.HISTORY), {
+        type: "recategorized", ts: now.toISOString(),
+        from: prevCategory || "(uncategorized)", to: newCategory,
+      })
+    );
 
     // Append — NOT setValues on ri. The old row (still at ri) is never
     // touched by this action; this creates a second, independent row for

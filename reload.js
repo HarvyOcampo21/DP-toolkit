@@ -125,6 +125,12 @@ const CHANGELOG = [
       { version: 60, notes: [
     "Restart (on a Rejected listing) now opens it as a proper new cycle \u2014 tracked as its own entry, same as a reshoot coming back automatically \u2014 and hands it straight back to the same editor who had it, ready to go as Assigned. It no longer jumps straight to In Progress; the editor still hits Start themselves once they actually pick it back up.",
   ]},
+      { version: 61, notes: [
+    "Fixed Time History only showing the CURRENT cycle for a listing that's been reopened or restarted \u2014 e.g. after a Restart, it was only showing this round's Assigned/Started/Completed and silently dropping the original assignment, the rejection, and the restart itself, even though that's all still on record. Time History now always shows the complete story from the very first Assigned through every cycle since.",
+  ]},
+      { version: 62, notes: [
+    "Fixed auto-reopen recreating the same Unassigned listing over and over even after deleting it from the sheet by hand \u2014 if the CRM's live category kept reading differently from what was on file, it would just keep reopening indefinitely with no memory that it had already done so. It now remembers, permanently, so deleting it for good actually sticks.",
+  ]},
 ];
 
 const card = document.getElementById("card");

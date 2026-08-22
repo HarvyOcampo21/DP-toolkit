@@ -2957,81 +2957,97 @@
       const timeline = document.createElement("div");
       timeline.className = "dp-timeline";
 
-      const events = [
-        {
-          key: "assignedAt", label: "Assigned", color: "#e6941a", dot: "assigned",
-          detail: entry
-            ? [
-                entry.editor     ? `To: ${entry.editor}`     : null,
-                entry.assignedBy ? `By: ${entry.assignedBy}` : null,
-              ].filter(Boolean).join("  \u00b7  ") || null
-            : null,
-        },
-        { key: "startedAt",   label: "Started",   color: "#00d1b2", dot: "started",   detail: null },
-        {
-          key: "onHoldAt", label: "On Hold", color: "#b39ddb", dot: "onhold",
-          detail: entry && entry.onHoldReason ? `Reason: ${entry.onHoldReason}` : null,
-        },
-        { key: "completedAt", label: "Completed", color: "#4ade80", dot: "completed", detail: null },
-        { key: "rejectedAt",  label: "Rejected",  color: "#ef9a9a", dot: "rejected",  detail: null },
-        { key: "downloadedAt", label: "Downloaded", color: "#60a5fa", dot: "downloaded", detail: null },
-      ];
+      // ── Event type → visual metadata ────────────────────────────────
+      // Every status-changing write on the server (assign/reassign,
+      // unassign, start, complete, reject, hold, download, restart,
+      // recategorize) always appends a matching entry to the raw History
+      // log alongside whatever flat column(s) it updates. That makes the
+      // raw log the one place a listing's FULL history survives across
+      // every cycle — unlike the flat "AtColumn" fields (assignedAt,
+      // rejectedAt, etc.), which only ever reflect the CURRENT row and go
+      // blank/wrong the moment a listing is reopened into a fresh row
+      // (see restartRejected/reopenOnCategoryChange, both of which
+      // deliberately clear those columns on the new row). This is why the
+      // timeline below is built from entry.history as its primary source.
+      const TIMELINE_EVENT_META = {
+        assigned:           { label: "Assigned",        color: "#e6941a", dot: "assigned" },
+        reassigned:         { label: "Reassigned",       color: "#f472b6", dot: "reassigned" },
+        unassigned:         { label: "Unassigned",       color: "#9ca3af", dot: "unassigned" },
+        started:            { label: "Started",          color: "#00d1b2", dot: "started" },
+        onhold:             { label: "On Hold",          color: "#b39ddb", dot: "onhold" },
+        completed:          { label: "Completed",        color: "#4ade80", dot: "completed" },
+        rejected:           { label: "Rejected",         color: "#ef9a9a", dot: "rejected" },
+        restarted:          { label: "Restarted",        color: "#fbbf24", dot: "restarted" },
+        downloaded:         { label: "Downloaded",       color: "#60a5fa", dot: "downloaded" },
+        downloaded_cleared: { label: "Download Cleared", color: "#9ca3af", dot: "downloaded_cleared" },
+        recategorized:      { label: "Recategorized",    color: "#fbbf24", dot: "recategorized" },
+      };
 
-      // Reassign event — built from the flat sheet columns (most recent reassignment).
-      const reassignEvent = (entry && entry.reassignedAt)
-        ? [{
-            label:  "Reassigned",
-            color:  "#f472b6",
-            dot:    "reassigned",
-            ts:     entry.reassignedAt,
-            detail: [
-              entry.reassignedFrom && entry.reassignedTo
-                ? `${entry.reassignedFrom} \u2192 ${entry.reassignedTo}` : null,
-              entry.reassignedBy ? `By: ${entry.reassignedBy}` : null,
-            ].filter(Boolean).join("  \u00b7  ") || null,
-          }]
-        : [];
+      function historyEventDetail(e) {
+        switch (e.type) {
+          case "assigned":
+            return [e.editor ? `To: ${e.editor}` : null, e.by ? `By: ${e.by}` : null]
+              .filter(Boolean).join("  \u00b7  ") || null;
+          case "reassigned":
+            return [e.from && e.to ? `${e.from} \u2192 ${e.to}` : null, e.by ? `By: ${e.by}` : null]
+              .filter(Boolean).join("  \u00b7  ") || null;
+          case "unassigned":
+            return [e.editor ? `From: ${e.editor}` : null, e.reason || null]
+              .filter(Boolean).join("  \u00b7  ") || null;
+          case "onhold":
+            return e.reason ? `Reason: ${e.reason}` : null;
+          case "restarted":
+            return e.by ? `By: ${e.by}` : null;
+          case "downloaded":
+            return e.editor ? `By: ${e.editor}` : null;
+          case "downloaded_cleared":
+            return e.reason || null;
+          case "recategorized":
+            return e.from && e.to ? `${e.from} \u2192 ${e.to}` : null;
+          default:
+            return null;
+        }
+      }
 
-      // Events that only exist in the raw History log, not as a dedicated
-      // flat "AtColumn" — recategorized/downloaded_cleared always (no flat
-      // column exists for either), plus any "downloaded" log entries that
-      // AREN'T the current downloadedAt (which is already shown via the
-      // flat-field row above). That second part matters specifically once
-      // a reopen clears downloadedAt: the flat-field row disappears, but
-      // the original download was still real and stays in the log —
-      // without this it would silently vanish from the visible timeline.
-      const rawLogEvents = (Array.isArray(entry && entry.history) ? entry.history : [])
-        .filter(e => e && (
-          e.type === "recategorized" ||
-          e.type === "downloaded_cleared" ||
-          (e.type === "downloaded" && e.ts !== (entry && entry.downloadedAt))
-        ))
-        .map(e => {
-          if (e.type === "recategorized") {
-            return {
-              label: "Recategorized", color: "#fbbf24", dot: "recategorized", ts: e.ts,
-              detail: e.from && e.to ? `${e.from} \u2192 ${e.to}` : null,
-            };
-          }
-          if (e.type === "downloaded_cleared") {
-            return {
-              label: "Download Cleared", color: "#9ca3af", dot: "downloaded_cleared", ts: e.ts,
-              detail: e.reason || null,
-            };
-          }
-          return {
-            label: "Downloaded", color: "#60a5fa", dot: "downloaded", ts: e.ts,
-            detail: e.editor ? `By: ${e.editor}` : null,
-          };
-        });
+      const historyLog = Array.isArray(entry && entry.history) ? entry.history : [];
 
-      const activeEvents = [
-        ...events.map(ev => ({ ...ev, ts: entry && entry[ev.key] ? entry[ev.key] : null })),
-        ...reassignEvent,
-        ...rawLogEvents,
-      ]
-        .filter(ev => ev.ts)
-        .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+      let activeEvents;
+      if (historyLog.length > 0) {
+        activeEvents = historyLog
+          .filter(e => e && e.type && e.ts && TIMELINE_EVENT_META[e.type])
+          .map(e => ({ ...TIMELINE_EVENT_META[e.type], ts: e.ts, detail: historyEventDetail(e) }))
+          .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+      } else {
+        // Legacy fallback — only reached for a row that predates this file
+        // always logging history alongside every write, so there's no log
+        // to read at all. Reconstructs what it can from the flat
+        // "AtColumn" snapshot instead. Necessarily single-cycle only —
+        // that's all a flat snapshot can ever represent — which matches
+        // what a row this old actually is.
+        const legacyEvents = [
+          { key: "assignedAt", label: "Assigned", color: "#e6941a", dot: "assigned",
+            detail: entry ? [entry.editor ? `To: ${entry.editor}` : null,
+                             entry.assignedBy ? `By: ${entry.assignedBy}` : null]
+                            .filter(Boolean).join("  \u00b7  ") || null : null },
+          { key: "startedAt", label: "Started", color: "#00d1b2", dot: "started", detail: null },
+          { key: "onHoldAt", label: "On Hold", color: "#b39ddb", dot: "onhold",
+            detail: entry && entry.onHoldReason ? `Reason: ${entry.onHoldReason}` : null },
+          { key: "completedAt", label: "Completed", color: "#4ade80", dot: "completed", detail: null },
+          { key: "rejectedAt", label: "Rejected", color: "#ef9a9a", dot: "rejected", detail: null },
+          { key: "downloadedAt", label: "Downloaded", color: "#60a5fa", dot: "downloaded", detail: null },
+        ];
+        const legacyReassign = (entry && entry.reassignedAt) ? [{
+          label: "Reassigned", color: "#f472b6", dot: "reassigned", ts: entry.reassignedAt,
+          detail: [entry.reassignedFrom && entry.reassignedTo
+                     ? `${entry.reassignedFrom} \u2192 ${entry.reassignedTo}` : null,
+                   entry.reassignedBy ? `By: ${entry.reassignedBy}` : null]
+                    .filter(Boolean).join("  \u00b7  ") || null,
+        }] : [];
+        activeEvents = [
+          ...legacyEvents.map(ev => ({ ...ev, ts: entry && entry[ev.key] ? entry[ev.key] : null })),
+          ...legacyReassign,
+        ].filter(ev => ev.ts).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+      }
 
       if (activeEvents.length === 0) {
         const empty = document.createElement("div");
@@ -3047,6 +3063,11 @@
           dotWrap.className = "dp-timeline-dot-wrap";
           const dot = document.createElement("div");
           dot.className = `dp-timeline-dot dp-dot-${ev.dot}`;
+          // Set inline too, not just via the dp-dot-* class — the two
+          // newest event types (restarted/unassigned) may not have a
+          // matching color rule in the stylesheet yet, and this way the
+          // dot is always correctly colored regardless.
+          dot.style.background = ev.color;
           dotWrap.appendChild(dot);
           if (i < activeEvents.length - 1) {
             const line = document.createElement("div");
