@@ -285,6 +285,11 @@ function buildAssignCard(a, name) {
   const listingRefEl = document.createElement("span");
   listingRefEl.className = "ac-listing-ref";
   listingRefEl.textContent = a.listingRef || "(no listing ref)";
+  if (a.listingRef) {
+    listingRefEl.classList.add("ac-ref-clickable");
+    listingRefEl.title = `Search ${a.listingRef} on the CRM tab`;
+    listingRefEl.addEventListener("click", () => dpAutoSearch(a.listingRef));
+  }
   top.appendChild(listingRefEl);
 
   const type = listingType(a.listingRef);
@@ -299,6 +304,11 @@ function buildAssignCard(a, name) {
   const reqRef = document.createElement("div");
   reqRef.className = "ac-req-ref";
   reqRef.textContent = a.ref || "";
+  if (a.ref) {
+    reqRef.classList.add("ac-ref-clickable");
+    reqRef.title = `Search ${a.ref} on the CRM tab`;
+    reqRef.addEventListener("click", () => dpAutoSearch(a.ref));
+  }
   card.appendChild(reqRef);
 
   const beds = bedsLabel(a.bedrooms);
@@ -497,6 +507,21 @@ function dpSendAction(type, payload, onFailure) {
     if (!resp || !resp.ok) {
       showToast((resp && resp.error) || "Action failed — please try again.");
       if (onFailure) onFailure();
+    }
+  });
+}
+
+// ── Auto-search on the CRM tab ───────────────────────────────────────────
+// Same DP_AUTO_SEARCH flow the dashboard already uses to jump a ref into
+// the CRM's own Photo Request search box (see handleAutoSearch in
+// background.js) — it focuses/creates the CRM's requests tab, types the
+// ref into the search box there, and fires the search. No name/role
+// requirement, since this doesn't write anything.
+function dpAutoSearch(ref) {
+  if (!ref) return;
+  chrome.runtime.sendMessage({ type: "DP_AUTO_SEARCH", ref }, resp => {
+    if (!(resp && resp.ok)) {
+      showToast((resp && resp.error) || "Could not search that reference on the CRM tab.");
     }
   });
 }

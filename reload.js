@@ -161,6 +161,9 @@ const CHANGELOG = [
     "The side panel no longer shows a blank \u201cLoading\u2026\u201d every time it's opened \u2014 it now shows your last-known assignments instantly, then quietly refreshes from the Sheet in the background. Start, Hold, and Downloaded are saved to that same local snapshot the moment you use them, so reopening the panel right after never shows stale data.",
     "Force Sync now explicitly skips this snapshot and goes straight to a fresh fetch, same as before.",
   ]},
+      { version: 70, notes: [
+    "Both reference numbers on a side panel card \u2014 the listing ref and the DP-REQ number \u2014 are now clickable. Tapping either jumps to your CRM tab (opening one if you don't have it open) and searches that reference for you, same as the dashboard's click-to-search already did.",
+  ]},
 ];
 
 const card = document.getElementById("card");
