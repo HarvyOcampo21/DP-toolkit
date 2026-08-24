@@ -77,13 +77,97 @@
   .ac-type-sales  { background: rgba(34,197,94,0.18);  color: #4ade80; }
   .ac-req-ref { font-size: 11px; color: #6b7280; margin-bottom: 10px; font-family: monospace; }
   .ac-beds { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa0ad; margin-bottom: 10px; }
+  .ac-bottom-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .ac-category {
     display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
+  }
+  .ac-status {
+    margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
   }
   .cat-photos-qc       { background: rgba(0,209,178,0.18);   color: #00d1b2; }
   .cat-stock-photos-qc { background: rgba(168,85,247,0.18);  color: #c9a4fa; }
   .cat-offplan-pending { background: rgba(230,148,26,0.18);  color: #f0b24a; }
   .cat-upload-pending  { background: rgba(154,160,173,0.18); color: #c7cbd8; }
+
+  /* ── Card actions: Start/Hold/Restart/View Reason ── */
+  .ac-actions-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .ac-btn {
+    border: 1px solid; border-radius: 6px; background: transparent;
+    padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;
+  }
+  .ac-start-btn  { color: #00d1b2; border-color: #00d1b2; }
+  .ac-start-btn:hover  { background: rgba(0,209,178,0.14); }
+  .ac-hold-btn   { color: #c9a4fa; border-color: #b39ddb; }
+  .ac-hold-btn:hover   { background: rgba(179,157,219,0.14); }
+  .ac-reason-btn { color: #9aa0ad; border-color: #353b4d; }
+  .ac-reason-btn:hover { background: #2b2f3d; }
+
+  /* ── Card icon row: Drive / History / Copy-ref ── */
+  .ac-icon-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .ac-icon-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 6px;
+    background: #1f222e; border: 1px solid #353b4d; color: #9aa0ad; cursor: pointer;
+  }
+  .ac-icon-btn:hover { border-color: #00d1b2; color: #00d1b2; }
+  .ac-icon-btn.is-active { border-color: #00d1b2; color: #00d1b2; background: rgba(0,209,178,0.10); }
+  .ac-icon-btn.is-copied { border-color: #00d1b2; color: #00d1b2; }
+
+  /* ── Sliding history panel — animates max-height, pushing later cards
+     down as it opens instead of overlaying them ── */
+  .ac-history-panel {
+    max-height: 0; overflow: hidden;
+    transition: max-height 0.28s ease;
+  }
+  .ac-timeline { padding-top: 10px; }
+  .ac-timeline-empty { color: #6b7280; font-size: 11px; padding: 6px 0; }
+  .ac-timeline-row { display: flex; gap: 8px; }
+  .ac-timeline-dot-wrap { display: flex; flex-direction: column; align-items: center; }
+  .ac-timeline-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 3px; flex-shrink: 0; }
+  .ac-timeline-line { width: 1px; flex: 1; background: #353b4d; margin: 2px 0; }
+  .ac-timeline-content { display: flex; flex-direction: column; padding-bottom: 10px; }
+  .ac-timeline-label { font-size: 11px; font-weight: 700; }
+  .ac-timeline-time  { font-size: 10.5px; color: #6b7280; margin-top: 1px; }
+  .ac-timeline-detail{ font-size: 10.5px; color: #9aa0ad; margin-top: 2px; }
+
+  /* ── Downloaded checkbox ── */
+  .ac-downloaded-wrap {
+    display: flex; align-items: center; gap: 6px; margin-top: 10px;
+    font-size: 11px; color: #9aa0ad; cursor: pointer;
+  }
+  .ac-downloaded-wrap input[type="checkbox"] { accent-color: #00d1b2; width: 13px; height: 13px; }
+
+  /* ── On Hold reason modal ── */
+  .dp-modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 1000;
+  }
+  .dp-modal {
+    background: #1f222e; border: 1px solid #353b4d; border-radius: 10px;
+    padding: 16px; width: min(320px, 86vw);
+  }
+  .dp-modal-title { font-size: 0.9rem; margin-bottom: 10px; }
+  .dp-modal-textarea {
+    width: 100%; min-height: 80px; background: #262a38; border: 1px solid #353b4d;
+    color: #e3e6ee; border-radius: 8px; padding: 8px; font-size: 12px;
+    font-family: inherit; resize: vertical;
+  }
+  .dp-modal-btn-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .dp-modal-cancel, .dp-modal-save {
+    border-radius: 7px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .dp-modal-cancel { background: transparent; border: 1px solid #353b4d; color: #9aa0ad; }
+  .dp-modal-save   { background: #00d1b2; border: none; color: #111; }
+
+  /* ── Toast ── */
+  #dpToast {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(8px);
+    background: #262a38; border: 1px solid #353b4d; color: #e3e6ee;
+    padding: 8px 14px; border-radius: 8px; font-size: 12px;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 1100; max-width: 90vw; text-align: center;
+  }
+  #dpToast.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   .empty-state { color: #6b7280; font-size: 0.85rem; text-align: center; padding: 24px 0; grid-column: 1 / -1; }
   .loading     { color: #6b7280; font-size: 0.82rem; padding: 6px 0; grid-column: 1 / -1; }

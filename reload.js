@@ -145,6 +145,15 @@ const CHANGELOG = [
     "Active assignments now show as cards with the listing reference, the photo request reference, bedrooms, and a Rental/Sales tag \u2014 instead of a bare reference and status pill.",
     "Removed the \u201cListing Logger\u201d tab (Log Lifestyle/Profile/Others) \u2014 it wasn't being used.",
   ]},
+      { version: 66, notes: [
+    "Assignment cards in the side panel are now tinted by status (Assigned, In Progress, On Hold, Rejected, Completed) using the same colors as the highlighted rows on the CRM page, with the status shown at the bottom right of the card.",
+    "On Hold listings now show up in Active Assignments too, not just Assigned \u2014 an On Hold listing is still yours, just paused.",
+  ]},
+      { version: 67, notes: [
+    "Side panel assignment cards now have the same actions as the CRM page \u2014 Start, Hold, Restart (on Rejected), View/Update Reason, Drive search, Copy reference, and a Downloaded checkbox \u2014 so you can manage a listing without switching over to the CRM tab.",
+    "Time History in the side panel now opens inline right on the card, sliding open in place instead of a popup, and pushes the rest of the list down as it expands.",
+    "Fixed a bug where starting a listing from the side panel made its card disappear from Active Assignments \u2014 In Progress listings now correctly stay visible, same as Assigned and On Hold.",
+  ]},
 ];
 
 const card = document.getElementById("card");
