@@ -164,6 +164,11 @@ const CHANGELOG = [
       { version: 70, notes: [
     "Both reference numbers on a side panel card \u2014 the listing ref and the DP-REQ number \u2014 are now clickable. Tapping either jumps to your CRM tab (opening one if you don't have it open) and searches that reference for you, same as the dashboard's click-to-search already did.",
   ]},
+      { version: 71, notes: [
+    "Redesigned side panel cards: status now sits beside the Rental/Sales pill, Start/Hold/View Reason now sit beside the category pill, and the Downloaded checkbox now sits beside the copy-reference button \u2014 fewer rows, easier to scan.",
+    "Removed the bedroom count from side panel cards.",
+    "The side panel now quietly refreshes itself every few seconds while it's open, so a listing you (or a teammate) complete on the CRM tab disappears from Active Assignments on its own \u2014 no more needing to reopen the panel or hit Force Sync to see it drop off.",
+  ]},
 ];
 
 const card = document.getElementById("card");

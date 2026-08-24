@@ -69,6 +69,7 @@
   }
   .ac-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
   .ac-listing-ref { font-size: 14px; font-weight: 700; color: #e3e6ee; overflow-wrap: anywhere; }
+  .ac-top-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .ac-type-tag {
     flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 8px;
     border-radius: 10px; letter-spacing: 0.02em;
@@ -78,21 +79,21 @@
   .ac-req-ref { font-size: 11px; color: #6b7280; margin-bottom: 10px; font-family: monospace; }
   .ac-ref-clickable { cursor: pointer; text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: transparent; transition: color 0.15s ease, text-decoration-color 0.15s ease; }
   .ac-ref-clickable:hover { color: #00d1b2; text-decoration-color: #00d1b2; }
-  .ac-beds { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa0ad; margin-bottom: 10px; }
-  .ac-bottom-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .ac-bottom-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
   .ac-category {
     display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
   }
   .ac-status {
-    margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
   }
   .cat-photos-qc       { background: rgba(0,209,178,0.18);   color: #00d1b2; }
   .cat-stock-photos-qc { background: rgba(168,85,247,0.18);  color: #c9a4fa; }
   .cat-offplan-pending { background: rgba(230,148,26,0.18);  color: #f0b24a; }
   .cat-upload-pending  { background: rgba(154,160,173,0.18); color: #c7cbd8; }
 
-  /* ── Card actions: Start/Hold/Restart/View Reason ── */
-  .ac-actions-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  /* ── Card actions: Start/Hold/Restart/View Reason — sit inline beside
+     the category pill in .ac-bottom-row ── */
+  .ac-actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .ac-btn {
     border: 1px solid; border-radius: 6px; background: transparent;
     padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;
@@ -132,9 +133,10 @@
   .ac-timeline-time  { font-size: 10.5px; color: #6b7280; margin-top: 1px; }
   .ac-timeline-detail{ font-size: 10.5px; color: #9aa0ad; margin-top: 2px; }
 
-  /* ── Downloaded checkbox ── */
+  /* ── Downloaded checkbox — sits inline beside the copy-ref button in
+     .ac-icon-row ── */
   .ac-downloaded-wrap {
-    display: flex; align-items: center; gap: 6px; margin-top: 10px;
+    display: flex; align-items: center; gap: 6px;
     font-size: 11px; color: #9aa0ad; cursor: pointer;
   }
   .ac-downloaded-wrap input[type="checkbox"] { accent-color: #00d1b2; width: 13px; height: 13px; }

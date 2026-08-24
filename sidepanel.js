@@ -31,6 +31,7 @@ function showSetup() {
   setupDiv.style.display     = "block";
   identityBar.style.display  = "none";
   assignSection.style.display = "none";
+  stopLivePolling();
 }
 
 function showMain(name, role) {
@@ -44,7 +45,38 @@ function showMain(name, role) {
 
   renderAssignmentsList(name);
   checkConnection();
+  startLivePolling(name);
 }
+
+// ── Live polling ──────────────────────────────────────────────────────────
+// Completing (or rejecting/reassigning) a listing normally happens over on
+// the CRM tab, not from this panel — so without this, a just-completed
+// listing would keep sitting in "Active assignments" here until someone
+// happened to reopen the panel or hit Force Sync. Polling in the background
+// means it drops off on its own within a few seconds, same spirit as the
+// CRM board's own ~3s active refresh (see v34 in the changelog). Paused
+// while the panel is hidden so it doesn't burn requests for no one to see,
+// and it re-syncs immediately the moment it's looked at again.
+const DP_POLL_INTERVAL_MS = 5000;
+let dpPollTimer = null;
+
+function startLivePolling(name) {
+  stopLivePolling();
+  dpPollTimer = setInterval(() => {
+    if (document.visibilityState === "visible") refreshFromServer(name);
+  }, DP_POLL_INTERVAL_MS);
+}
+
+function stopLivePolling() {
+  if (dpPollTimer) { clearInterval(dpPollTimer); dpPollTimer = null; }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  chrome.storage.local.get(["myName"], ({ myName }) => {
+    if (myName) refreshFromServer(myName);
+  });
+});
 
 saveBtn.addEventListener("click", () => {
   const name = nameSelect.value;
@@ -123,12 +155,6 @@ function rowStatusKey(status) {
 // active) — leaving it out meant tapping Start made a card disappear
 // from its own owner's list mid-shoot.
 const ACTIVE_STATUSES = ["Assigned", "In Progress", "On Hold"];
-
-function bedsLabel(bedrooms) {
-  if (bedrooms === "" || bedrooms === null || bedrooms === undefined || bedrooms === "?") return null;
-  if (bedrooms === "0" || bedrooms === 0) return "Studio";
-  return `${bedrooms} bed${bedrooms === "1" || bedrooms === 1 ? "" : "s"}`;
-}
 
 // currentAssignments holds the exact objects rendered on screen right now
 // (keyed by ref via each card's dataset), so an action can mutate the
@@ -292,13 +318,27 @@ function buildAssignCard(a, name) {
   }
   top.appendChild(listingRefEl);
 
+  // ── Top-right cluster: status beside the Rental/Sales pill ─────────────
+  const topRight = document.createElement("div");
+  topRight.className = "ac-top-right";
+
+  if (a.status) {
+    const status = document.createElement("span");
+    status.className = "ac-status";
+    status.textContent = a.status;
+    if (colors) status.style.color = colors.border;
+    topRight.appendChild(status);
+  }
+
   const type = listingType(a.listingRef);
   if (type) {
     const tag = document.createElement("span");
     tag.className = "ac-type-tag " + (type === "rental" ? "ac-type-rental" : "ac-type-sales");
     tag.textContent = type === "rental" ? "RENTAL" : "SALES";
-    top.appendChild(tag);
+    topRight.appendChild(tag);
   }
+
+  if (topRight.childNodes.length) top.appendChild(topRight);
   card.appendChild(top);
 
   const reqRef = document.createElement("div");
@@ -311,14 +351,10 @@ function buildAssignCard(a, name) {
   }
   card.appendChild(reqRef);
 
-  const beds = bedsLabel(a.bedrooms);
-  if (beds) {
-    const bedsRow = document.createElement("div");
-    bedsRow.className = "ac-beds";
-    bedsRow.textContent = beds;
-    card.appendChild(bedsRow);
-  }
-
+  // ── Bottom row: category pill beside Start / Hold / View Reason ────────
+  // Rejected listings never appear in this list (ACTIVE_STATUSES excludes
+  // "Rejected"), so there's no Restart button here — Restart only makes
+  // sense from the CRM page's full board where Rejected rows are visible.
   const bottomRow = document.createElement("div");
   bottomRow.className = "ac-bottom-row";
 
@@ -330,20 +366,6 @@ function buildAssignCard(a, name) {
     bottomRow.appendChild(cat);
   }
 
-  if (a.status) {
-    const status = document.createElement("span");
-    status.className = "ac-status";
-    status.textContent = a.status;
-    if (colors) status.style.color = colors.border;
-    bottomRow.appendChild(status);
-  }
-
-  card.appendChild(bottomRow);
-
-  // ── Actions row: Start / Hold / View Reason ─────────────────────────────
-  // Rejected listings never appear in this list (ACTIVE_STATUSES excludes
-  // "Rejected"), so there's no Restart button here — Restart only makes
-  // sense from the CRM page's full board where Rejected rows are visible.
   const actionsRow = document.createElement("div");
   actionsRow.className = "ac-actions-row";
 
@@ -375,9 +397,10 @@ function buildAssignCard(a, name) {
     }, "See why this listing is on hold"));
   }
 
-  if (actionsRow.childNodes.length) card.appendChild(actionsRow);
+  if (actionsRow.childNodes.length) bottomRow.appendChild(actionsRow);
+  if (bottomRow.childNodes.length) card.appendChild(bottomRow);
 
-  // ── Icon row: Drive search / History (sliding) / Copy ref ──────────────
+  // ── Icon row: Drive search / History (sliding) / Copy ref / Downloaded ─
   const iconRow = document.createElement("div");
   iconRow.className = "ac-icon-row";
 
@@ -424,10 +447,7 @@ function buildAssignCard(a, name) {
   });
   iconRow.appendChild(copyBtn);
 
-  card.appendChild(iconRow);
-  card.appendChild(historyPanel);
-
-  // ── Downloaded checkbox ─────────────────────────────────────────────────
+  // ── Downloaded checkbox — sits right beside the copy-ref button ────────
   const downloadedLabel = document.createElement("label");
   downloadedLabel.className = "ac-downloaded-wrap";
   downloadedLabel.title = "Mark as downloaded from Drive";
@@ -449,7 +469,10 @@ function buildAssignCard(a, name) {
   downloadedText.textContent = "Downloaded";
   downloadedLabel.appendChild(downloadedCheckbox);
   downloadedLabel.appendChild(downloadedText);
-  card.appendChild(downloadedLabel);
+  iconRow.appendChild(downloadedLabel);
+
+  card.appendChild(iconRow);
+  card.appendChild(historyPanel);
 
   return card;
 }
