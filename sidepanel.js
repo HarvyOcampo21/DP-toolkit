@@ -130,36 +130,147 @@ function bedsLabel(bedrooms) {
   return `${bedrooms} bed${bedrooms === "1" || bedrooms === 1 ? "" : "s"}`;
 }
 
-function renderAssignmentsList(name) {
-  listContainer.innerHTML = '<div class="loading">Loading…</div>';
-  if (totalBadge) totalBadge.innerHTML = "";
+// currentAssignments holds the exact objects rendered on screen right now
+// (keyed by ref via each card's dataset), so an action can mutate the
+// SAME object the card was built from and re-render just that one card —
+// instant feedback, no round trip to the server needed to see the change.
+let currentAssignments = [];
 
-  chrome.runtime.sendMessage({ type: "DP_GET_ALL" }, resp => {
-    if (!resp || !resp.ok || !resp.data || !Array.isArray(resp.data.assignments)) {
-      listContainer.innerHTML = '<div class="empty-state">Could not load listings.</div>';
-      return;
-    }
+// ── Local snapshot cache ─────────────────────────────────────────────────
+// Same idea as assigner-content.js's dpAssignSnapshot on the CRM page: the
+// panel shouldn't go blank/"Loading…" every time it's opened just because
+// the network round trip hasn't come back yet. Whatever was last rendered
+// (including the panel's own optimistic writes — see refreshCard below) is
+// written to storage as it happens, so the very next open can paint
+// instantly from that, then quietly refresh from the server in the
+// background and reconcile once the real data lands.
+const DP_SNAPSHOT_KEY = "dpSidepanelSnapshot";
 
-    const active = resp.data.assignments.filter(a =>
-      a.editor === name && ACTIVE_STATUSES.includes(a.status)
-    );
+function saveSnapshot(name) {
+  try {
+    chrome.storage.local.set({
+      [DP_SNAPSHOT_KEY]: JSON.stringify({ name, assignments: currentAssignments, savedAt: Date.now() }),
+    });
+  } catch (e) { /* storage full or unavailable — snapshot is a nice-to-have, not required */ }
+}
 
-    if (active.length === 0) {
-      listContainer.innerHTML = '<div class="empty-state">No active assignments — all clear!</div>';
-      totalBadge.innerHTML = "";
-      return;
-    }
-
-    listContainer.innerHTML = "";
-    active.forEach(a => listContainer.appendChild(buildAssignCard(a)));
-
-    totalBadge.innerHTML = `Total: <span>${active.length}</span>`;
+function loadSnapshot(name, cb) {
+  chrome.storage.local.get([DP_SNAPSHOT_KEY], result => {
+    const raw = result && result[DP_SNAPSHOT_KEY];
+    if (!raw) { cb(null); return; }
+    try {
+      const snap = JSON.parse(raw);
+      // Only trust a snapshot saved for THIS name and shaped the way we
+      // expect — a stale/foreign/malformed snapshot is treated as none.
+      if (snap && snap.name === name && Array.isArray(snap.assignments)) cb(snap);
+      else cb(null);
+    } catch (e) { cb(null); }
   });
 }
 
-function buildAssignCard(a) {
+function findCardEl(ref) {
+  return Array.from(listContainer.children).find(el => el.dataset && el.dataset.dpRef === ref);
+}
+
+function renderTotalBadge() {
+  if (!totalBadge) return;
+  totalBadge.innerHTML = currentAssignments.length ? `Total: <span>${currentAssignments.length}</span>` : "";
+}
+
+// Full rebuild of the list from whatever's currently in currentAssignments
+// — used for the initial paint (from cache or from a fresh fetch) and
+// after every background refresh. Individual actions don't go through
+// this; they patch just their own card via refreshCard for instant,
+// flicker-free feedback.
+function renderList(name) {
+  if (currentAssignments.length === 0) {
+    listContainer.innerHTML = '<div class="empty-state">No active assignments — all clear!</div>';
+  } else {
+    listContainer.innerHTML = "";
+    currentAssignments.forEach(a => listContainer.appendChild(buildAssignCard(a, name)));
+  }
+  renderTotalBadge();
+}
+
+// opts.skipCache forces straight past the local snapshot to a fresh
+// network fetch (with the normal "Loading…" state) — used by Force Sync,
+// where the whole point is bypassing whatever's cached.
+function renderAssignmentsList(name, opts) {
+  const skipCache = !!(opts && opts.skipCache);
+  if (skipCache) {
+    listContainer.innerHTML = '<div class="loading">Loading…</div>';
+    if (totalBadge) totalBadge.innerHTML = "";
+    refreshFromServer(name);
+    return;
+  }
+
+  loadSnapshot(name, snap => {
+    if (snap) {
+      currentAssignments = snap.assignments;
+      renderList(name);
+    } else {
+      listContainer.innerHTML = '<div class="loading">Loading…</div>';
+      if (totalBadge) totalBadge.innerHTML = "";
+    }
+    // Always follow up with a real fetch, whether or not we had a cached
+    // snapshot to paint first — the cache is only ever a placeholder for
+    // the instant the panel opens, never the final word.
+    refreshFromServer(name);
+  });
+}
+
+function refreshFromServer(name) {
+  chrome.runtime.sendMessage({ type: "DP_GET_ALL" }, resp => {
+    if (!resp || !resp.ok || !resp.data || !Array.isArray(resp.data.assignments)) {
+      // Nothing to show yet at all (first-ever load, no snapshot) — show
+      // the error state. Otherwise leave the cached cards up rather than
+      // wiping a perfectly good (if slightly stale) view over one failed
+      // refresh, and just let the person know.
+      if (currentAssignments.length === 0) {
+        listContainer.innerHTML = '<div class="empty-state">Could not load listings.</div>';
+      } else {
+        showToast("Could not refresh — showing last known data.");
+      }
+      return;
+    }
+
+    currentAssignments = resp.data.assignments.filter(a =>
+      a.editor === name && ACTIVE_STATUSES.includes(a.status)
+    );
+    renderList(name);
+    saveSnapshot(name);
+  });
+}
+
+// Re-renders a single assignment's card in place after its status was
+// mutated locally — or drops it out of the list if that status no longer
+// counts as "active". Called both right after the optimistic update and
+// again if the server write turns out to have failed (to roll it back).
+// Either way, the snapshot is re-saved so a quick close/reopen of the
+// panel reflects exactly what's on screen, not a moment before it.
+function refreshCard(a, name) {
+  const stillActive = ACTIVE_STATUSES.includes(a.status);
+  const oldCard = findCardEl(a.ref);
+
+  if (!stillActive) {
+    currentAssignments = currentAssignments.filter(x => x !== a);
+    if (oldCard) oldCard.remove();
+    if (currentAssignments.length === 0) {
+      listContainer.innerHTML = '<div class="empty-state">No active assignments — all clear!</div>';
+    }
+  } else {
+    const newCard = buildAssignCard(a, name);
+    if (oldCard) oldCard.replaceWith(newCard);
+    else listContainer.appendChild(newCard);
+  }
+  renderTotalBadge();
+  saveSnapshot(name);
+}
+
+function buildAssignCard(a, name) {
   const card = document.createElement("div");
   card.className = "assign-card";
+  card.dataset.dpRef = a.ref || "";
 
   const statusKey = rowStatusKey(a.status);
   const colors = STATUS_COLORS[statusKey];
@@ -219,30 +330,28 @@ function buildAssignCard(a) {
 
   card.appendChild(bottomRow);
 
-  // ── Actions row: Start / Hold / Restart / View Reason ──────────────────
+  // ── Actions row: Start / Hold / View Reason ─────────────────────────────
+  // Rejected listings never appear in this list (ACTIVE_STATUSES excludes
+  // "Rejected"), so there's no Restart button here — Restart only makes
+  // sense from the CRM page's full board where Rejected rows are visible.
   const actionsRow = document.createElement("div");
   actionsRow.className = "ac-actions-row";
 
-  const isOnHold  = a.status === "On Hold";
-  const isRejected = a.status === "Rejected";
-  const isActive  = a.status === "Assigned" || a.status === "In Progress" || a.status === "On Hold";
+  const isOnHold = a.status === "On Hold";
+  const isActive = a.status === "Assigned" || a.status === "In Progress" || a.status === "On Hold";
 
   if (a.status === "Assigned" || a.status === "On Hold") {
     actionsRow.appendChild(mkActionBtn("Start", "ac-start-btn", () => {
-      dpSendAction("DP_MARK_INPROGRESS", { ref: a.ref, title: a.title }, name);
+      applyOptimisticUpdate(a, name, { status: "In Progress" },
+        () => dpSendAction("DP_MARK_INPROGRESS", { ref: a.ref, title: a.title }));
     }));
-  }
-
-  if (isRejected) {
-    actionsRow.appendChild(mkActionBtn("Restart", "ac-start-btn", () => {
-      dpSendAction("DP_RESTART_REJECTED", { ref: a.ref, title: a.title }, name);
-    }, "Reopen this listing as a new cycle and reassign it back to you"));
   }
 
   if (isActive) {
     actionsRow.appendChild(mkActionBtn("Hold", "ac-hold-btn", () => {
       showOnHoldModal("", "edit", reason => {
-        dpSendAction("DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }, name);
+        applyOptimisticUpdate(a, name, { status: "On Hold", onHoldReason: reason },
+          () => dpSendAction("DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }));
       });
     }, "Put on hold with reason"));
   }
@@ -250,7 +359,8 @@ function buildAssignCard(a) {
   if (isOnHold) {
     actionsRow.appendChild(mkActionBtn("View Reason", "ac-reason-btn", () => {
       showOnHoldModal(a.onHoldReason || "", "edit", reason => {
-        dpSendAction("DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }, name);
+        applyOptimisticUpdate(a, name, { onHoldReason: reason },
+          () => dpSendAction("DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }));
       });
     }, "See why this listing is on hold"));
   }
@@ -317,9 +427,13 @@ function buildAssignCard(a) {
   downloadedCheckbox.addEventListener("change", () => {
     const val = downloadedCheckbox.checked;
     const downloadedAt = val ? new Date().toISOString() : "";
-    dpSendAction("DP_SET_DOWNLOADED",
-      { ref: a.ref, downloaded: val, downloadedAt, title: a.title }, name,
-      () => { downloadedCheckbox.checked = !val; }); // revert on failure
+    a.downloaded = val;
+    saveSnapshot(name);
+    dpSendAction("DP_SET_DOWNLOADED", { ref: a.ref, downloaded: val, downloadedAt, title: a.title }, () => {
+      a.downloaded = !val;
+      downloadedCheckbox.checked = !val;
+      saveSnapshot(name);
+    });
   });
   const downloadedText = document.createElement("span");
   downloadedText.textContent = "Downloaded";
@@ -355,22 +469,35 @@ const ICON_DRIVE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" 
 const ICON_HISTORY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
 const ICON_COPY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
 
-// ── Sending a write action to background.js, then refreshing the list ────
-// Every write (Start/Hold/Restart/Downloaded) goes through the same
-// background.js handlers the CRM content script already uses, so behavior
-// (name-required guard, Sheet writes, history logging) stays identical
-// between the two surfaces. On success we just re-fetch the active list
-// rather than hand-patching this one card's DOM — simplest way to stay
-// correct if the status change also means the card should drop out of
-// "active" (e.g. eventually Completed/Rejected elsewhere).
-function dpSendAction(type, payload, name, onFailure) {
+// ── Optimistic update: mutate the local assignment, re-render its card
+// immediately, THEN talk to the server. Mirrors exactly what the CRM page's
+// content script does (see markInProgress/setOnHold there) — the person
+// sees the change the instant they click, instead of waiting on a round
+// trip that (per past Apps Script latency issues) can lag a couple seconds
+// behind the write actually landing. Reverts the local mutation and
+// re-renders again if the write comes back failed.
+function applyOptimisticUpdate(a, name, patch, sendFn) {
+  const previous = { ...a };
+  Object.assign(a, patch);
+  refreshCard(a, name);
+  sendFn(() => {
+    Object.assign(a, previous);
+    refreshCard(a, name);
+  });
+}
+
+// ── Sending a write action to background.js ─────────────────────────────
+// Every write (Start/Hold/Downloaded) goes through the same background.js
+// handlers the CRM content script already uses, so behavior (name-required
+// guard, Sheet writes, history logging) stays identical between the two
+// surfaces. Purely fire-and-verify here — the caller already updated the
+// UI optimistically and only needs to know if it must be rolled back.
+function dpSendAction(type, payload, onFailure) {
   chrome.runtime.sendMessage({ type, ...payload }, resp => {
     if (!resp || !resp.ok) {
       showToast((resp && resp.error) || "Action failed — please try again.");
       if (onFailure) onFailure();
-      return;
     }
-    if (name) renderAssignmentsList(name);
   });
 }
 
@@ -609,7 +736,7 @@ if (dpForceSyncBtn) {
 
     chrome.storage.local.get(['myName'], ({ myName }) => {
       if (myName) {
-        renderAssignmentsList(myName);
+        renderAssignmentsList(myName, { skipCache: true });
       }
       dpForceSyncBtn.disabled = false;
       dpForceSyncBtn.textContent = '⟳ Force Sync';

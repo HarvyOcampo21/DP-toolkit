@@ -150,9 +150,16 @@ const CHANGELOG = [
     "On Hold listings now show up in Active Assignments too, not just Assigned \u2014 an On Hold listing is still yours, just paused.",
   ]},
       { version: 67, notes: [
-    "Side panel assignment cards now have the same actions as the CRM page \u2014 Start, Hold, Restart (on Rejected), View/Update Reason, Drive search, Copy reference, and a Downloaded checkbox \u2014 so you can manage a listing without switching over to the CRM tab.",
+    "Side panel assignment cards now have the same actions as the CRM page \u2014 Start, Hold, View/Update Reason, Drive search, Copy reference, and a Downloaded checkbox \u2014 so you can manage a listing without switching over to the CRM tab.",
     "Time History in the side panel now opens inline right on the card, sliding open in place instead of a popup, and pushes the rest of the list down as it expands.",
     "Fixed a bug where starting a listing from the side panel made its card disappear from Active Assignments \u2014 In Progress listings now correctly stay visible, same as Assigned and On Hold.",
+  ]},
+      { version: 68, notes: [
+    "Fixed Start/Hold on the side panel not visibly changing a card's status \u2014 it now updates the card the instant you click, instead of waiting on a refetch from Apps Script that could take a few seconds to reflect the write.",
+  ]},
+      { version: 69, notes: [
+    "The side panel no longer shows a blank \u201cLoading\u2026\u201d every time it's opened \u2014 it now shows your last-known assignments instantly, then quietly refreshes from the Sheet in the background. Start, Hold, and Downloaded are saved to that same local snapshot the moment you use them, so reopening the panel right after never shows stale data.",
+    "Force Sync now explicitly skips this snapshot and goes straight to a fresh fetch, same as before.",
   ]},
 ];
 
