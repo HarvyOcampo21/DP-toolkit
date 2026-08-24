@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DP Toolkit</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #1b1e29; color: #e3e6ee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px;
+  }
+
+  .header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px 12px; border-bottom: 1px solid #2b2f3d;
+  }
+  .header img { width: 26px; }
+  .header h2 { font-size: 0.95rem; font-weight: 700; }
+
+  .badge {
+    border-radius: 12px; padding: 2px 9px; font-size: 0.72rem; font-weight: 700;
+    margin-left: 6px; vertical-align: middle;
+  }
+  .badge-junior { background: rgba(255,167,38,0.18); color: #e6941a; }
+  .badge-senior { background: rgba(0,209,178,0.18);  color: #00d1b2; }
+
+  .content { padding: 14px 16px; max-width: 640px; }
+
+  /* ── Shared identity picker ── */
+  #setup label { display: block; color: #9aa0ad; font-size: 0.82rem; margin-bottom: 6px; }
+  #setup select {
+    width: 100%; background: #262a38; border: 1px solid #353b4d;
+    color: #e3e6ee; border-radius: 8px; padding: 7px 10px;
+    font-size: 0.88rem; margin-bottom: 10px;
+  }
+  #setup button.save {
+    width: 100%; background: #00d1b2; border: none; color: #111;
+    font-weight: 700; border-radius: 8px; padding: 8px;
+    font-size: 0.9rem; cursor: pointer;
+  }
+  #setup button.save:hover { background: #00b89c; }
+
+  #identityBar {
+    display: none; align-items: center; justify-content: space-between;
+    background: #262a38; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px;
+  }
+  #identityBar .who { font-size: 0.85rem; font-weight: 600; color: #c7cbd8; }
+  #identityBar button {
+    background: none; border: none; color: #6b7280;
+    font-size: 0.76rem; text-decoration: underline; cursor: pointer;
+  }
+
+  #assignSection { display: none; }
+
+  /* ── Assignment cards ── */
+  .section-title {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: #6b7280; margin-bottom: 7px;
+  }
+  .section-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+
+  #listContainer {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .assign-card {
+    background: #262a38; border: 1px solid #353b4d; border-radius: 9px; padding: 12px 14px;
+  }
+  .ac-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
+  .ac-listing-ref { font-size: 14px; font-weight: 700; color: #e3e6ee; overflow-wrap: anywhere; }
+  .ac-type-tag {
+    flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 10px; letter-spacing: 0.02em;
+  }
+  .ac-type-rental { background: rgba(59,130,246,0.18); color: #7cb0f5; }
+  .ac-type-sales  { background: rgba(34,197,94,0.18);  color: #4ade80; }
+  .ac-req-ref { font-size: 11px; color: #6b7280; margin-bottom: 10px; font-family: monospace; }
+  .ac-beds { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa0ad; margin-bottom: 10px; }
+  .ac-category {
+    display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
+  }
+  .cat-photos-qc       { background: rgba(0,209,178,0.18);   color: #00d1b2; }
+  .cat-stock-photos-qc { background: rgba(168,85,247,0.18);  color: #c9a4fa; }
+  .cat-offplan-pending { background: rgba(230,148,26,0.18);  color: #f0b24a; }
+  .cat-upload-pending  { background: rgba(154,160,173,0.18); color: #c7cbd8; }
+
+  .empty-state { color: #6b7280; font-size: 0.85rem; text-align: center; padding: 24px 0; grid-column: 1 / -1; }
+  .loading     { color: #6b7280; font-size: 0.82rem; padding: 6px 0; grid-column: 1 / -1; }
+  .total-badge { font-size: 0.78rem; color: #9aa0ad; }
+  .total-badge span { color: #00d1b2; font-weight: 700; }
+
+  .divider { border: none; border-top: 1px solid #2b2f3d; margin: 14px 0; }
+
+  .quick-link-btn {
+    display: flex; align-items: center; gap: 8px; width: 100%; max-width: 320px; padding: 9px 12px;
+    background: #262a38; border: 1px solid #353b4d; border-radius: 7px; color: #9aa0ad;
+    font-size: 13px; font-weight: 500; text-decoration: none; margin-bottom: 6px;
+  }
+  .quick-link-btn:hover { border-color: #00d1b2; color: #00d1b2; }
+
+  /* ── Footer: connection status + force sync + version ── */
+  #dpFooter {
+    margin-top: 16px; padding-top: 12px; border-top: 1px solid #2b2f3d;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  #dpConnWrap { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #9aa0ad; }
+  #dpConnDot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  #dpConnDot.dot-ok    { background: #00d1b2; }
+  #dpConnDot.dot-warn  { background: #e6941a; }
+  #dpConnDot.dot-error { background: #ef4444; }
+  #dpForceSyncBtn {
+    background: #262a38; border: 1px solid #353b4d; color: #9aa0ad;
+    border-radius: 6px; padding: 4px 9px; font-size: 0.7rem; font-weight: 700;
+    cursor: pointer; white-space: nowrap;
+  }
+  #dpForceSyncBtn:hover:not(:disabled) { border-color: #00d1b2; color: #00d1b2; }
+  #dpForceSyncBtn:disabled { opacity: 0.6; cursor: default; }
+  #dpVersionText { font-size: 0.72rem; color: #6b7280; font-family: monospace; }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="icons/icon48.png">
+    <div><h2>DP Toolkit <span class="badge" id="roleBadge"></span></h2></div>
+  </div>
+
+  <div class="content">
+
+    <!-- ── Shared identity picker ── -->
+    <div id="setup">
+      <label for="nameSelect">Select your name:</label>
+      <select id="nameSelect">
+        <option value="">-- Choose your name --</option>
+        <option>Harvy</option>
+        <option>Jabir</option>
+        <option>Mark</option>
+        <option>Sudheep</option>
+      </select>
+      <button class="save" id="saveBtn">Save</button>
+    </div>
+
+    <div id="identityBar">
+      <span class="who" id="whoText"></span>
+      <button id="changeNameBtn">Change name</button>
+    </div>
+
+    <!-- ── Assignments ── -->
+    <div id="assignSection">
+      <div class="section-row">
+        <div class="section-title">Active assignments</div>
+        <div class="total-badge" id="totalBadge"></div>
+      </div>
+      <div id="listContainer"><div class="loading">Loading…</div></div>
+
+      <hr class="divider">
+
+      <div class="section-title">Quick Links</div>
+      <a href="https://dp-dashboard-5j9.pages.dev/" target="_blank" class="quick-link-btn">🖥 Open Dashboard</a>
+      <a href="https://docs.google.com/spreadsheets/d/19UgIXRizvOcly1UBKJuQIcKe0s4KuSEPuPUOqc5zN-8/edit?gid=460408169#gid=460408169" target="_blank" class="quick-link-btn">📊 Open Google Sheet</a>
+    </div>
+
+    <div id="dpFooter">
+      <div id="dpConnWrap">
+        <div id="dpConnDot" class="dot-warn"></div>
+        <span id="dpConnText">Checking…</span>
+      </div>
+      <button id="dpForceSyncBtn" title="Re-check connection and re-fetch the latest data from the Sheet, bypassing any local cache">⟳ Force Sync</button>
+      <span id="dpVersionText"></span>
+    </div>
+
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

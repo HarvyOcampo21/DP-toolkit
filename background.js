@@ -1,5 +1,10 @@
 "use strict";
 
+// Clicking the toolbar icon opens the side panel directly — see
+// manifest.json's "side_panel" key (sidepanel.html replaces the old
+// popup.html/popup.js) and the removed "default_popup" from "action".
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
 // ─────────────────────────────────────────────────────────────────────────
 // DP Toolkit — unified background service worker
 // Combines:

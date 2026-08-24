@@ -140,6 +140,11 @@ const CHANGELOG = [
     "Fixed a leftover empty gap above the filter bar from the v63 cleanup.",
     "The \u2699 settings icon no longer shows a background box on hover, and is now sized to exactly match the height of the Editor/Status buttons next to it.",
   ]},
+      { version: 65, notes: [
+    "The toolbar icon now opens a side panel instead of a small popup, so it can stay open next to the CRM while you work.",
+    "Active assignments now show as cards with the listing reference, the photo request reference, bedrooms, and a Rental/Sales tag \u2014 instead of a bare reference and status pill.",
+    "Removed the \u201cListing Logger\u201d tab (Log Lifestyle/Profile/Others) \u2014 it wasn't being used.",
+  ]},
 ];
 
 const card = document.getElementById("card");

@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "DP Toolkit",
-  "version": "64",
+  "version": "65",
   "description": "Assign & track photo requests, copy/log listing info to Google Sheets, and preview/download listing photos — all in one extension. Access level (senior/junior) is detected automatically from the name you select.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl4iwsTGV2RlfWmELh24yhoqauBl1/oGqpZTcs+PkRfcvxwKweTpBtbvvm8cYKu+peCew73evucDs6VcEGknZWPxZf1SPF5yTcV3J0pxSdCSj5he+PAtcvLDKixXWsTGf9+1D9agq2jE8UFp6CJuXjZwpJiF2XbZNzmI1KRoT8t/A3t8/pFXOyK5tSeSmVis1DqCZIt1Zh0/JC/1F18IZ/S1pGG98YNgEH1PUI2iYRUmtCTzjNEnBqiK3GpxCOD6eCHjFqYrNrNXNmQnAN66kfN1wBoY50COvNhF3YXiXTuTSzc9FDitK0FE22q5biWS0MSGhYoNrQBOJ1ClzVK+adQIDAQAB",
-  "permissions": ["storage", "clipboardWrite", "downloads", "offscreen", "tabs", "notifications", "alarms"],
+  "permissions": ["storage", "clipboardWrite", "downloads", "offscreen", "tabs", "notifications", "alarms", "sidePanel"],
   "host_permissions": [
     "https://newcrm.drivenproperties.com/*",
     "https://script.google.com/*",
@@ -16,7 +16,8 @@
     "matches": ["https://dp-dashboard-5j9.pages.dev/*"]
   },
   "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "DP Toolkit" },
+  "action": { "default_title": "DP Toolkit" },
+  "side_panel": { "default_path": "sidepanel.html" },
   "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
   "content_scripts": [
     {
