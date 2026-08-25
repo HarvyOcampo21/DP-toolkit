@@ -173,6 +173,10 @@ const CHANGELOG = [
     "Clicking a reference number to auto-search the CRM (from the side panel, the dashboard, or a notification) now targets your second open CRM tab instead of your first, if you have more than one open.",
     "Added category filter tabs to the top of the side panel's Active Assignments list \u2014 All, QC, Offplan Pending, and Upload Pending. \"Photos For QC\" and \"Stock Photos For QC\" both live under the combined QC tab. Your last-used tab is remembered next time you open the panel.",
   ]},
+      { version: 73, notes: [
+    "Removed the redundant \"DP Toolkit\" header from inside the side panel \u2014 Chrome already shows the icon and title in its own side panel header bar, so ours was just repeating it. The Senior/Junior badge that used to live up there now sits right next to your name instead.",
+    "Category filter tabs no longer sit in an enclosing box \u2014 just the icons themselves now, matching a plain Chrome tab strip more closely.",
+  ]},
 ];
 
 const card = document.getElementById("card");

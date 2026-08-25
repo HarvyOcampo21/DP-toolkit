@@ -11,13 +11,6 @@
     font-size: 13px;
   }
 
-  .header {
-    display: flex; align-items: center; gap: 10px;
-    padding: 14px 16px 12px; border-bottom: 1px solid #2b2f3d;
-  }
-  .header img { width: 26px; }
-  .header h2 { font-size: 0.95rem; font-weight: 700; }
-
   .badge {
     border-radius: 12px; padding: 2px 9px; font-size: 0.72rem; font-weight: 700;
     margin-left: 6px; vertical-align: middle;
@@ -25,7 +18,7 @@
   .badge-junior { background: rgba(255,167,38,0.18); color: #e6941a; }
   .badge-senior { background: rgba(0,209,178,0.18);  color: #00d1b2; }
 
-  .content { padding: 14px 16px; max-width: 640px; }
+  .content { padding: 16px 16px 14px; max-width: 640px; }
 
   /* ── Shared identity picker ── */
   #setup label { display: block; color: #9aa0ad; font-size: 0.82rem; margin-bottom: 6px; }
@@ -45,6 +38,7 @@
     display: none; align-items: center; justify-content: space-between;
     background: #262a38; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px;
   }
+  #identityBar .who-wrap { display: flex; align-items: center; }
   #identityBar .who { font-size: 0.85rem; font-weight: 600; color: #c7cbd8; }
   #identityBar button {
     background: none; border: none; color: #6b7280;
@@ -61,13 +55,13 @@
   .section-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 
   /* ── Category filter tabs — a Chrome-pinned-tabs-style icon strip.
-     One rounded "well" holding icon-only tabs, thin dividers between
-     neighbors, active tab raised/lit with a teal icon + count badge. ── */
+     Icon-only tabs sitting directly on the page (no enclosing well),
+     thin dividers between neighbors, active tab lit with a teal icon
+     + count badge. ── */
   .dp-tabs {
-    display: flex; align-items: center; gap: 1px;
+    display: flex; align-items: center; gap: 2px;
     width: fit-content; max-width: 100%; overflow-x: auto;
-    background: #161822; border: 1px solid #2b2f3d; border-radius: 10px;
-    padding: 3px; margin-bottom: 14px;
+    margin-bottom: 14px;
   }
   .dp-tabs::-webkit-scrollbar { display: none; }
   .dp-tab {
@@ -247,11 +241,6 @@
 </head>
 <body>
 
-  <div class="header">
-    <img src="icons/icon48.png">
-    <div><h2>DP Toolkit <span class="badge" id="roleBadge"></span></h2></div>
-  </div>
-
   <div class="content">
 
     <!-- ── Shared identity picker ── -->
@@ -268,7 +257,10 @@
     </div>
 
     <div id="identityBar">
-      <span class="who" id="whoText"></span>
+      <div class="who-wrap">
+        <span class="who" id="whoText"></span>
+        <span class="badge" id="roleBadge"></span>
+      </div>
       <button id="changeNameBtn">Change name</button>
     </div>
 
