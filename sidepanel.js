@@ -4,7 +4,7 @@
 // background.js's default and used to gate Assigner permissions in
 // assigner-content.js. Add/move names here as the team changes.
 const NAME_ROLES = {
-  Harvy:   "junior",
+  Harvy:   "senior",
   Mark:    "senior",
   Sudheep: "senior",
   Jabir:   "junior",
