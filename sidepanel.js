@@ -41,6 +41,9 @@ const assignSection  = document.getElementById("assignSection");
 const listContainer  = document.getElementById("listContainer");
 const totalBadge     = document.getElementById("totalBadge");
 const categoryTabsEl = document.getElementById("dpCategoryTabs");
+const statCompletedEl = document.getElementById("dpStatCompleted");
+const statRejectedEl  = document.getElementById("dpStatRejected");
+const statTotalEl     = document.getElementById("dpStatTotal");
 
 // ── Identity ────────────────────────────────────────────────────────────
 function showSetup() {
@@ -53,7 +56,7 @@ function showSetup() {
 function showMain(name, role) {
   setupDiv.style.display      = "none";
   identityBar.style.display   = "flex";
-  assignSection.style.display = "block";
+  assignSection.style.display = "flex";
 
   currentUserName = name;
   whoText.textContent = `Hi, ${name}!`;
@@ -183,6 +186,46 @@ const ACTIVE_STATUSES = ["Assigned", "In Progress", "On Hold"];
 // instant feedback, no round trip to the server needed to see the change.
 let currentAssignments = [];
 
+// ── Today's activity stats (Completed / Rejected / Total) ────────────────
+// Read straight from each of the CURRENT USER's assignments' own history
+// log (the same a.history used by the per-card timeline) — count any
+// "completed"/"rejected" event whose timestamp falls on today's calendar
+// date. Nothing to reset at midnight: since it's always computed fresh off
+// real timestamps rather than an incrementing counter, it naturally only
+// ever reflects "today" the moment the clock rolls over.
+let currentTodayStats = { completed: 0, rejected: 0, total: 0 };
+
+function isToday(iso) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (isNaN(d)) return false;
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() &&
+         d.getMonth() === now.getMonth() &&
+         d.getDate() === now.getDate();
+}
+
+function computeTodayStats(fullAssignments, name) {
+  let completed = 0, rejected = 0;
+  fullAssignments.forEach(a => {
+    if (a.editor !== name) return;
+    const historyLog = Array.isArray(a.history) ? a.history : [];
+    historyLog.forEach(e => {
+      if (!e || !e.ts) return;
+      if (e.type === "completed" && isToday(e.ts)) completed++;
+      if (e.type === "rejected"  && isToday(e.ts)) rejected++;
+    });
+  });
+  return { completed, rejected, total: completed + rejected };
+}
+
+function renderTodayStats() {
+  if (!statCompletedEl || !statRejectedEl || !statTotalEl) return;
+  statCompletedEl.textContent = String(currentTodayStats.completed);
+  statRejectedEl.textContent  = String(currentTodayStats.rejected);
+  statTotalEl.textContent     = String(currentTodayStats.total);
+}
+
 // ── Local snapshot cache ─────────────────────────────────────────────────
 // Same idea as assigner-content.js's dpAssignSnapshot on the CRM page: the
 // panel shouldn't go blank/"Loading…" every time it's opened just because
@@ -196,7 +239,9 @@ const DP_SNAPSHOT_KEY = "dpSidepanelSnapshot";
 function saveSnapshot(name) {
   try {
     chrome.storage.local.set({
-      [DP_SNAPSHOT_KEY]: JSON.stringify({ name, assignments: currentAssignments, savedAt: Date.now() }),
+      [DP_SNAPSHOT_KEY]: JSON.stringify({
+        name, assignments: currentAssignments, todayStats: currentTodayStats, savedAt: Date.now(),
+      }),
     });
   } catch (e) { /* storage full or unavailable — snapshot is a nice-to-have, not required */ }
 }
@@ -281,6 +326,7 @@ function renderCategoryTabs() {
 // flicker-free feedback.
 function renderList(name) {
   renderCategoryTabs();
+  renderTodayStats();
 
   const visible = visibleAssignments();
   if (currentAssignments.length === 0) {
@@ -309,6 +355,12 @@ function renderAssignmentsList(name, opts) {
   loadSnapshot(name, snap => {
     if (snap) {
       currentAssignments = snap.assignments;
+      // Only trust cached stats if they were saved today — otherwise
+      // they're yesterday's numbers and would flash before the real
+      // fetch below corrects them a moment later.
+      currentTodayStats = (snap.todayStats && isToday(new Date(snap.savedAt).toISOString()))
+        ? snap.todayStats
+        : { completed: 0, rejected: 0, total: 0 };
       renderList(name);
     } else {
       listContainer.innerHTML = '<div class="loading">Loading…</div>';
@@ -339,6 +391,7 @@ function refreshFromServer(name) {
     currentAssignments = resp.data.assignments.filter(a =>
       a.editor === name && ACTIVE_STATUSES.includes(a.status)
     );
+    currentTodayStats = computeTodayStats(resp.data.assignments, name);
     renderList(name);
     saveSnapshot(name);
   });

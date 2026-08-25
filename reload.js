@@ -177,6 +177,13 @@ const CHANGELOG = [
     "Removed the redundant \"DP Toolkit\" header from inside the side panel \u2014 Chrome already shows the icon and title in its own side panel header bar, so ours was just repeating it. The Senior/Junior badge that used to live up there now sits right next to your name instead.",
     "Category filter tabs no longer sit in an enclosing box \u2014 just the icons themselves now, matching a plain Chrome tab strip more closely.",
   ]},
+      { version: 74, notes: [
+    "Fixed the category filter tabs' count badges getting clipped at the top and right edge.",
+  ]},
+      { version: 75, notes: [
+    "Quick Links and the connection/Force Sync footer are now pinned to the bottom of the side panel at all times \u2014 only the assignment card list scrolls, so these no longer end up buried far down the page when you've got a long list, or floating awkwardly high up when you've got a short one.",
+    "Added a \"Today's Activity\" line above Quick Links showing how many listings you've completed and rejected today, plus a running total. It's read straight from each listing's own history log, so it naturally resets itself at midnight \u2014 nothing to clear manually.",
+  ]},
 ];
 
 const card = document.getElementById("card");
