@@ -13,6 +13,21 @@ function roleForName(name) {
   return NAME_ROLES[name] || "junior"; // unknown names default to the safer role
 }
 
+// ── Category filter tabs ────────────────────────────────────────────────
+// "Stock Photos For QC" and "Photos For QC" both live under one combined
+// "QC" tab since, from an assignment-triage standpoint, they're the same
+// kind of work — the distinction only matters once you're inside the card.
+const CATEGORY_FILTERS = [
+  { id: "all",     label: "All",              icon: "icons/filters/all.png",     match: null },
+  { id: "qc",      label: "QC",               icon: "icons/filters/qc.png",
+    match: s => s === "Photos For QC" || s === "Stock Photos For QC" },
+  { id: "offplan", label: "Offplan Pending",  icon: "icons/filters/offplan.png", match: s => s === "Offplan Pending" },
+  { id: "upload",  label: "Upload Pending",   icon: "icons/filters/upload.png",  match: s => s === "Upload Pending" },
+];
+const DP_CATEGORY_FILTER_KEY = "dpCategoryFilter";
+let activeCategoryFilter = "all";
+let currentUserName = null; // set once in showMain — lets tab clicks re-render without re-threading `name` everywhere
+
 // ── Elements ────────────────────────────────────────────────────────────
 const setupDiv      = document.getElementById("setup");
 const identityBar    = document.getElementById("identityBar");
@@ -25,6 +40,7 @@ const assignSection  = document.getElementById("assignSection");
 
 const listContainer  = document.getElementById("listContainer");
 const totalBadge     = document.getElementById("totalBadge");
+const categoryTabsEl = document.getElementById("dpCategoryTabs");
 
 // ── Identity ────────────────────────────────────────────────────────────
 function showSetup() {
@@ -39,6 +55,7 @@ function showMain(name, role) {
   identityBar.style.display   = "flex";
   assignSection.style.display = "block";
 
+  currentUserName = name;
   whoText.textContent = `Hi, ${name}!`;
   roleBadge.textContent = role === "senior" ? "Senior" : "Junior";
   roleBadge.className   = "badge " + (role === "senior" ? "badge-senior" : "badge-junior");
@@ -90,7 +107,11 @@ saveBtn.addEventListener("click", () => {
 
 changeBtn.addEventListener("click", showSetup);
 
-chrome.storage.local.get(["myName", "role"], result => {
+chrome.storage.local.get(["myName", "role", DP_CATEGORY_FILTER_KEY], result => {
+  if (CATEGORY_FILTERS.some(f => f.id === result[DP_CATEGORY_FILTER_KEY])) {
+    activeCategoryFilter = result[DP_CATEGORY_FILTER_KEY];
+  }
+
   const name = result && result.myName;
   if (!name) { showSetup(); return; }
 
@@ -198,9 +219,59 @@ function findCardEl(ref) {
   return Array.from(listContainer.children).find(el => el.dataset && el.dataset.dpRef === ref);
 }
 
+// Assignments matching the currently selected tab. "All" (match: null)
+// always returns the full list untouched.
+function visibleAssignments() {
+  const filter = CATEGORY_FILTERS.find(f => f.id === activeCategoryFilter) || CATEGORY_FILTERS[0];
+  return filter.match ? currentAssignments.filter(a => filter.match(a.crmStatus)) : currentAssignments;
+}
+
 function renderTotalBadge() {
   if (!totalBadge) return;
-  totalBadge.innerHTML = currentAssignments.length ? `Total: <span>${currentAssignments.length}</span>` : "";
+  const n = visibleAssignments().length;
+  totalBadge.innerHTML = n ? `Total: <span>${n}</span>` : "";
+}
+
+// Rebuilds the tab strip itself — icon + a small count badge per tab, and
+// an is-active class on whichever one matches activeCategoryFilter. Cheap
+// enough to just fully rebuild every time the list changes rather than
+// diffing, since there are only ever 4 of these.
+function renderCategoryTabs() {
+  if (!categoryTabsEl) return;
+  categoryTabsEl.innerHTML = "";
+
+  CATEGORY_FILTERS.forEach(f => {
+    const count = f.match ? currentAssignments.filter(a => f.match(a.crmStatus)).length : currentAssignments.length;
+
+    const tab = document.createElement("div");
+    tab.className = "dp-tab" + (activeCategoryFilter === f.id ? " is-active" : "");
+    tab.title = `${f.label}${count ? ` (${count})` : ""}`;
+    tab.setAttribute("role", "button");
+    tab.setAttribute("aria-label", f.label);
+    tab.setAttribute("aria-pressed", activeCategoryFilter === f.id ? "true" : "false");
+
+    const icon = document.createElement("span");
+    icon.className = "dp-tab-icon";
+    icon.style.webkitMaskImage = `url("${f.icon}")`;
+    icon.style.maskImage = `url("${f.icon}")`;
+    tab.appendChild(icon);
+
+    if (count > 0) {
+      const badge = document.createElement("span");
+      badge.className = "dp-tab-count";
+      badge.textContent = count > 99 ? "99+" : String(count);
+      tab.appendChild(badge);
+    }
+
+    tab.addEventListener("click", () => {
+      if (activeCategoryFilter === f.id) return;
+      activeCategoryFilter = f.id;
+      chrome.storage.local.set({ [DP_CATEGORY_FILTER_KEY]: f.id });
+      renderList(currentUserName);
+    });
+
+    categoryTabsEl.appendChild(tab);
+  });
 }
 
 // Full rebuild of the list from whatever's currently in currentAssignments
@@ -209,11 +280,16 @@ function renderTotalBadge() {
 // this; they patch just their own card via refreshCard for instant,
 // flicker-free feedback.
 function renderList(name) {
+  renderCategoryTabs();
+
+  const visible = visibleAssignments();
   if (currentAssignments.length === 0) {
     listContainer.innerHTML = '<div class="empty-state">No active assignments — all clear!</div>';
+  } else if (visible.length === 0) {
+    listContainer.innerHTML = '<div class="empty-state">Nothing in this category right now.</div>';
   } else {
     listContainer.innerHTML = "";
-    currentAssignments.forEach(a => listContainer.appendChild(buildAssignCard(a, name)));
+    visible.forEach(a => listContainer.appendChild(buildAssignCard(a, name)));
   }
   renderTotalBadge();
 }
@@ -275,20 +351,31 @@ function refreshFromServer(name) {
 // Either way, the snapshot is re-saved so a quick close/reopen of the
 // panel reflects exactly what's on screen, not a moment before it.
 function refreshCard(a, name) {
-  const stillActive = ACTIVE_STATUSES.includes(a.status);
-  const oldCard = findCardEl(a.ref);
+  const stillActive   = ACTIVE_STATUSES.includes(a.status);
+  const oldCard       = findCardEl(a.ref);
+  const filter        = CATEGORY_FILTERS.find(f => f.id === activeCategoryFilter) || CATEGORY_FILTERS[0];
+  const matchesFilter = !filter.match || filter.match(a.crmStatus);
 
   if (!stillActive) {
     currentAssignments = currentAssignments.filter(x => x !== a);
     if (oldCard) oldCard.remove();
-    if (currentAssignments.length === 0) {
-      listContainer.innerHTML = '<div class="empty-state">No active assignments — all clear!</div>';
-    }
+  } else if (!matchesFilter) {
+    // Still an active assignment, just not part of the currently selected
+    // tab — pull it off screen without touching currentAssignments.
+    if (oldCard) oldCard.remove();
   } else {
     const newCard = buildAssignCard(a, name);
     if (oldCard) oldCard.replaceWith(newCard);
     else listContainer.appendChild(newCard);
   }
+
+  if (visibleAssignments().length === 0) {
+    listContainer.innerHTML = currentAssignments.length === 0
+      ? '<div class="empty-state">No active assignments — all clear!</div>'
+      : '<div class="empty-state">Nothing in this category right now.</div>';
+  }
+
+  renderCategoryTabs();
   renderTotalBadge();
   saveSnapshot(name);
 }

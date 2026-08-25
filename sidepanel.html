@@ -60,6 +60,44 @@
   }
   .section-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 
+  /* ── Category filter tabs — a Chrome-pinned-tabs-style icon strip.
+     One rounded "well" holding icon-only tabs, thin dividers between
+     neighbors, active tab raised/lit with a teal icon + count badge. ── */
+  .dp-tabs {
+    display: flex; align-items: center; gap: 1px;
+    width: fit-content; max-width: 100%; overflow-x: auto;
+    background: #161822; border: 1px solid #2b2f3d; border-radius: 10px;
+    padding: 3px; margin-bottom: 14px;
+  }
+  .dp-tabs::-webkit-scrollbar { display: none; }
+  .dp-tab {
+    position: relative; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    width: 36px; height: 30px; border-radius: 7px;
+    cursor: pointer;
+  }
+  .dp-tab:not(:last-child)::after {
+    content: ""; position: absolute; right: -1px; top: 22%; bottom: 22%; width: 1px;
+    background: #2f3444;
+  }
+  .dp-tab.is-active::after, .dp-tab.is-active + .dp-tab::after { background: transparent; }
+  .dp-tab:hover { background: #20232f; }
+  .dp-tab.is-active { background: #2b2f3d; }
+  .dp-tab-icon {
+    width: 16px; height: 16px; flex-shrink: 0;
+    background-color: #767c8c;
+    -webkit-mask-size: contain; -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
+    mask-size: contain; mask-repeat: no-repeat; mask-position: center;
+  }
+  .dp-tab:hover .dp-tab-icon { background-color: #9aa0ad; }
+  .dp-tab.is-active .dp-tab-icon { background-color: #00d1b2; }
+  .dp-tab-count {
+    position: absolute; top: -4px; right: -4px; min-width: 14px; height: 14px;
+    padding: 0 3px; border-radius: 7px; background: #353b4d; color: #c7cbd8;
+    font-size: 9px; font-weight: 800; line-height: 14px; text-align: center;
+  }
+  .dp-tab.is-active .dp-tab-count { background: #00d1b2; color: #0d1017; }
+
   #listContainer {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 10px;
@@ -240,6 +278,9 @@
         <div class="section-title">Active assignments</div>
         <div class="total-badge" id="totalBadge"></div>
       </div>
+
+      <div id="dpCategoryTabs" class="dp-tabs"></div>
+
       <div id="listContainer"><div class="loading">Loading…</div></div>
 
       <hr class="divider">

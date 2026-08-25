@@ -619,12 +619,12 @@ const CRM_REQUESTS_DEFAULT_URL = "https://newcrm.drivenproperties.com/photoreque
 async function handleAutoSearch(ref) {
   if (!ref) throw new Error("No reference number given.");
 
-  // Always target the SECOND open CRM tab (tabs[1] in chrome.tabs.query's
-  // tab-strip order), never the first — per Harvy's setup the first CRM
-  // tab is reserved and shouldn't get hijacked by auto-search. If fewer
-  // than two CRM tabs are open, fall through below and open a new one.
   const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
-  let tab = tabs[1];
+  // Always target the SECOND CRM tab (by the order Chrome reports them —
+  // left-to-right in the tab strip) instead of the first. Falls back to
+  // the only tab available when just one is open, and to opening a brand
+  // new one when none are open at all.
+  let tab = tabs.length > 1 ? tabs[1] : tabs[0];
 
   if (tab) {
     await chrome.tabs.update(tab.id, { active: true });
@@ -635,9 +635,8 @@ async function handleAutoSearch(ref) {
     return;
   }
 
-  // Fewer than two CRM tabs open (no "second" tab to target) — open a
-  // new one and wait for it to finish loading before we try to talk to
-  // its content script.
+  // No matching tab open anywhere — open one and wait for it to finish
+  // loading before we try to talk to its content script.
   const newTab = await chrome.tabs.create({ url: CRM_REQUESTS_DEFAULT_URL, active: true });
   await waitForTabComplete(newTab.id);
   await sendFillMessageWithRetry(newTab.id, ref);
