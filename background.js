@@ -689,3 +689,58 @@ async function sendFillMessageWithRetry(tabId, ref, attempts = 8) {
   }
   throw new Error("Could not reach the search box on the CRM tab in time.");
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// AUTO "ALL" FILTER CLICK
+// ═══════════════════════════════════════════════════════════════════════
+// The side panel's "Auto-Refresh" toggle + interval slider (sidepanel.js)
+// write straight to chrome.storage.local — no message needed to turn this
+// on/off, we just react to the storage change here. While enabled, once
+// every N minutes (1–60, whatever the slider is set to) this pings every
+// open CRM Photo Requests tab and has auto-all-click-content.js click that
+// page's own "All" filter button, which forces the board to reload its
+// data. Runs from the background so it keeps going even if the side panel
+// itself gets closed — only flipping the toggle off stops it.
+const AUTO_ALL_CLICK_ALARM   = "dpAutoAllClick";
+const AUTO_ALL_CLICK_STORAGE = "dpAutoAllClick"; // { enabled, intervalMinutes }
+
+async function syncAutoAllClickAlarm() {
+  const result = await chrome.storage.local.get([AUTO_ALL_CLICK_STORAGE]);
+  const settings = result[AUTO_ALL_CLICK_STORAGE];
+  const enabled  = !!(settings && settings.enabled);
+  const minutes  = Math.min(60, Math.max(1, Number(settings && settings.intervalMinutes) || 5));
+
+  if (enabled) {
+    // Re-creating with the same name just resets the existing alarm to the
+    // (possibly new) interval rather than duplicating it — safe to call
+    // this on every service worker wake, same pattern as the assignment
+    // notification poller above.
+    chrome.alarms.create(AUTO_ALL_CLICK_ALARM, { periodInMinutes: minutes });
+  } else {
+    chrome.alarms.clear(AUTO_ALL_CLICK_ALARM);
+  }
+}
+
+// Covers both "toggled from the side panel just now" (storage.onChanged
+// wakes the service worker on its own) and "browser/extension just
+// restarted" (this top-level call runs every time the worker wakes fresh).
+syncAutoAllClickAlarm();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes[AUTO_ALL_CLICK_STORAGE]) syncAutoAllClickAlarm();
+});
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === AUTO_ALL_CLICK_ALARM) clickAllFilterOnCrmTabs();
+});
+
+async function clickAllFilterOnCrmTabs() {
+  const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
+  for (const tab of tabs) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: "DP_CLICK_ALL_FILTER" });
+    } catch {
+      // No content script on this tab yet (still loading) or it's not
+      // currently on the requests list view — just skip it this tick.
+    }
+  }
+}

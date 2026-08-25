@@ -184,6 +184,9 @@ const CHANGELOG = [
     "Quick Links and the connection/Force Sync footer are now pinned to the bottom of the side panel at all times \u2014 only the assignment card list scrolls, so these no longer end up buried far down the page when you've got a long list, or floating awkwardly high up when you've got a short one.",
     "Added a \"Today's Activity\" line above Quick Links showing how many listings you've completed and rejected today, plus a running total. It's read straight from each listing's own history log, so it naturally resets itself at midnight \u2014 nothing to clear manually.",
   ]},
+      { version: 76, notes: [
+    "Added an \"Auto-Refresh CRM\" toggle to the side panel. Switch it on and, every 1\u201360 minutes (set with the slider that appears once it's on), the toolkit clicks the \"All\" filter on the Photo Requests board for you on every open CRM tab \u2014 an easy way to keep the board's data current without remembering to click it yourself. Runs in the background, so it keeps going even with the side panel closed; flip the toggle off to stop it.",
+  ]},
 ];
 
 const card = document.getElementById("card");

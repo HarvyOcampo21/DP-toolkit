@@ -16,13 +16,6 @@
     height: 100vh; overflow: hidden; /* only #listContainer scrolls internally */
   }
 
-  .badge {
-    border-radius: 12px; padding: 2px 9px; font-size: 0.72rem; font-weight: 700;
-    margin-left: 6px; vertical-align: middle;
-  }
-  .badge-junior { background: rgba(255,167,38,0.18); color: #e6941a; }
-  .badge-senior { background: rgba(0,209,178,0.18);  color: #00d1b2; }
-
   .content {
     display: flex; flex-direction: column;
     flex: 1; min-height: 0;
@@ -243,6 +236,31 @@
   .dp-stat-total { margin-left: auto; color: #c7cbd8; }
   .dp-stat-total b { color: #00d1b2; }
 
+  /* ── Auto-Refresh CRM: toggle switch + interval slider ── */
+  .dp-toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .dp-switch { position: relative; display: inline-block; width: 34px; height: 19px; flex-shrink: 0; }
+  .dp-switch input { opacity: 0; width: 0; height: 0; }
+  .dp-switch-slider {
+    position: absolute; inset: 0; cursor: pointer;
+    background: #353b4d; border-radius: 20px; transition: background 0.15s ease;
+  }
+  .dp-switch-slider::before {
+    content: ""; position: absolute; width: 15px; height: 15px; left: 2px; top: 2px;
+    background: #e3e6ee; border-radius: 50%; transition: transform 0.15s ease;
+  }
+  .dp-switch input:checked + .dp-switch-slider { background: #00d1b2; }
+  .dp-switch input:checked + .dp-switch-slider::before { transform: translateX(15px); background: #0d1017; }
+  .dp-toggle-label { font-size: 12.5px; color: #c7cbd8; }
+
+  /* Hidden by default — JS reveals this the moment the toggle is on, and
+     hides it again the instant it's switched off. */
+  .dp-interval-wrap { display: none; margin: 10px 0 12px; }
+  .dp-interval-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #9aa0ad; }
+  .dp-interval-row input[type="range"] {
+    flex: 1; accent-color: #00d1b2; height: 4px; cursor: pointer;
+  }
+  #dpAutoAllIntervalValue { min-width: 50px; text-align: right; color: #e3e6ee; font-weight: 700; font-size: 12px; }
+
   .quick-link-btn {
     display: flex; align-items: center; gap: 8px; width: 100%; max-width: 320px; padding: 9px 12px;
     background: #262a38; border: 1px solid #353b4d; border-radius: 7px; color: #9aa0ad;
@@ -320,6 +338,24 @@
         </div>
         <div class="dp-stat dp-stat-total">
           Total <b id="dpStatTotal">0</b>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="section-title">Auto-Refresh CRM</div>
+      <div class="dp-toggle-row">
+        <label class="dp-switch">
+          <input type="checkbox" id="dpAutoAllToggle">
+          <span class="dp-switch-slider"></span>
+        </label>
+        <span class="dp-toggle-label">Auto-click "All" on open CRM tabs</span>
+      </div>
+      <div id="dpAutoAllIntervalWrap" class="dp-interval-wrap">
+        <div class="dp-interval-row">
+          <span>Every</span>
+          <input type="range" id="dpAutoAllInterval" min="1" max="60" step="1" value="5">
+          <span id="dpAutoAllIntervalValue">5 min</span>
         </div>
       </div>
 

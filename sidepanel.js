@@ -7,7 +7,6 @@ const NAME_ROLES = {
   Harvy:   "senior",
   Mark:    "senior",
   Sudheep: "senior",
-  Jabir:   "junior",
 };
 function roleForName(name) {
   return NAME_ROLES[name] || "junior"; // unknown names default to the safer role
@@ -34,7 +33,6 @@ const identityBar    = document.getElementById("identityBar");
 const nameSelect     = document.getElementById("nameSelect");
 const saveBtn        = document.getElementById("saveBtn");
 const whoText        = document.getElementById("whoText");
-const roleBadge      = document.getElementById("roleBadge");
 const changeBtn      = document.getElementById("changeNameBtn");
 const assignSection  = document.getElementById("assignSection");
 
@@ -44,6 +42,11 @@ const categoryTabsEl = document.getElementById("dpCategoryTabs");
 const statCompletedEl = document.getElementById("dpStatCompleted");
 const statRejectedEl  = document.getElementById("dpStatRejected");
 const statTotalEl     = document.getElementById("dpStatTotal");
+
+const autoAllToggle         = document.getElementById("dpAutoAllToggle");
+const autoAllIntervalWrap   = document.getElementById("dpAutoAllIntervalWrap");
+const autoAllIntervalInput  = document.getElementById("dpAutoAllInterval");
+const autoAllIntervalValueEl = document.getElementById("dpAutoAllIntervalValue");
 
 // ── Identity ────────────────────────────────────────────────────────────
 function showSetup() {
@@ -60,8 +63,6 @@ function showMain(name, role) {
 
   currentUserName = name;
   whoText.textContent = `Hi, ${name}!`;
-  roleBadge.textContent = role === "senior" ? "Senior" : "Junior";
-  roleBadge.className   = "badge " + (role === "senior" ? "badge-senior" : "badge-junior");
 
   renderAssignmentsList(name);
   checkConnection();
@@ -936,4 +937,49 @@ if (dpForceSyncBtn) {
 const dpVersionText = document.getElementById("dpVersionText");
 if (dpVersionText) {
   dpVersionText.textContent = "v" + chrome.runtime.getManifest().version;
+}
+
+// ── Auto-Refresh CRM (auto-click "All") ─────────────────────────────────
+// The actual periodic clicking happens in background.js via chrome.alarms,
+// so it keeps running even if this panel gets closed — all this does is
+// read/write the setting in chrome.storage.local. background.js reacts to
+// the storage change on its own; there's no message to send here.
+const AUTO_ALL_CLICK_KEY = "dpAutoAllClick";
+
+function renderAutoAllUI(settings) {
+  if (!autoAllToggle) return;
+  const enabled = !!(settings && settings.enabled);
+  const minutes = Math.min(60, Math.max(1, Number(settings && settings.intervalMinutes) || 5));
+
+  autoAllToggle.checked = enabled;
+  autoAllIntervalInput.value = String(minutes);
+  autoAllIntervalValueEl.textContent = `${minutes} min`;
+  autoAllIntervalWrap.style.display = enabled ? "block" : "none";
+}
+
+function saveAutoAllClickSettings() {
+  chrome.storage.local.set({
+    [AUTO_ALL_CLICK_KEY]: {
+      enabled: autoAllToggle.checked,
+      intervalMinutes: Number(autoAllIntervalInput.value) || 5,
+    },
+  });
+}
+
+if (autoAllToggle) {
+  chrome.storage.local.get([AUTO_ALL_CLICK_KEY], result => renderAutoAllUI(result[AUTO_ALL_CLICK_KEY]));
+
+  autoAllToggle.addEventListener("change", () => {
+    autoAllIntervalWrap.style.display = autoAllToggle.checked ? "block" : "none";
+    saveAutoAllClickSettings();
+  });
+
+  // "input" fires continuously while dragging — just update the live label
+  // with that. "change" fires once on release — that's when we actually
+  // persist and reset the alarm's interval, so dragging doesn't spam
+  // chrome.storage.local (and re-arm the alarm) on every pixel of drag.
+  autoAllIntervalInput.addEventListener("input", () => {
+    autoAllIntervalValueEl.textContent = `${autoAllIntervalInput.value} min`;
+  });
+  autoAllIntervalInput.addEventListener("change", saveAutoAllClickSettings);
 }
