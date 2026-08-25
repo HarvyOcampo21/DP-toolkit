@@ -4,10 +4,10 @@
 // background.js's default and used to gate Assigner permissions in
 // assigner-content.js. Add/move names here as the team changes.
 const NAME_ROLES = {
-  Harvy:   "senior",
+  Harvy:   "junior",
   Mark:    "senior",
   Sudheep: "senior",
-  Jabir:   "senior",
+  Jabir:   "junior",
 };
 function roleForName(name) {
   return NAME_ROLES[name] || "junior"; // unknown names default to the safer role
