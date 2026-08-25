@@ -187,6 +187,10 @@ const CHANGELOG = [
       { version: 76, notes: [
     "Added an \"Auto-Refresh CRM\" toggle to the side panel. Switch it on and, every 1\u201360 minutes (set with the slider that appears once it's on), the toolkit clicks the \"All\" filter on the Photo Requests board for you on every open CRM tab \u2014 an easy way to keep the board's data current without remembering to click it yourself. Runs in the background, so it keeps going even with the side panel closed; flip the toggle off to stop it.",
   ]},
+      { version: 77, notes: [
+    "Auto-Refresh CRM now shows a live countdown to the next auto-click, right under the interval slider.",
+    "Auto-Refresh CRM now only clicks \"All\" on your first open CRM tab, instead of every open CRM tab.",
+  ]},
 ];
 
 const card = document.getElementById("card");

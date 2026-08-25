@@ -260,6 +260,7 @@
     flex: 1; accent-color: #00d1b2; height: 4px; cursor: pointer;
   }
   #dpAutoAllIntervalValue { min-width: 50px; text-align: right; color: #e3e6ee; font-weight: 700; font-size: 12px; }
+  .dp-countdown { margin-top: 6px; font-size: 11px; color: #6b7280; font-variant-numeric: tabular-nums; }
 
   .quick-link-btn {
     display: flex; align-items: center; gap: 8px; width: 100%; max-width: 320px; padding: 9px 12px;
@@ -349,7 +350,7 @@
           <input type="checkbox" id="dpAutoAllToggle">
           <span class="dp-switch-slider"></span>
         </label>
-        <span class="dp-toggle-label">Auto-click "All" on open CRM tabs</span>
+        <span class="dp-toggle-label">Auto-click "All" on first CRM tab</span>
       </div>
       <div id="dpAutoAllIntervalWrap" class="dp-interval-wrap">
         <div class="dp-interval-row">
@@ -357,6 +358,7 @@
           <input type="range" id="dpAutoAllInterval" min="1" max="60" step="1" value="5">
           <span id="dpAutoAllIntervalValue">5 min</span>
         </div>
+        <div id="dpAutoAllCountdown" class="dp-countdown"></div>
       </div>
 
       <hr class="divider">

@@ -696,11 +696,11 @@ async function sendFillMessageWithRetry(tabId, ref, attempts = 8) {
 // The side panel's "Auto-Refresh" toggle + interval slider (sidepanel.js)
 // write straight to chrome.storage.local — no message needed to turn this
 // on/off, we just react to the storage change here. While enabled, once
-// every N minutes (1–60, whatever the slider is set to) this pings every
-// open CRM Photo Requests tab and has auto-all-click-content.js click that
-// page's own "All" filter button, which forces the board to reload its
-// data. Runs from the background so it keeps going even if the side panel
-// itself gets closed — only flipping the toggle off stops it.
+// every N minutes (1–60, whatever the slider is set to) this pings the
+// first open CRM Photo Requests tab and has auto-all-click-content.js
+// click that page's own "All" filter button, which forces the board to
+// reload its data. Runs from the background so it keeps going even if the
+// side panel itself gets closed — only flipping the toggle off stops it.
 const AUTO_ALL_CLICK_ALARM   = "dpAutoAllClick";
 const AUTO_ALL_CLICK_STORAGE = "dpAutoAllClick"; // { enabled, intervalMinutes }
 
@@ -735,12 +735,18 @@ chrome.alarms.onAlarm.addListener(alarm => {
 
 async function clickAllFilterOnCrmTabs() {
   const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
-  for (const tab of tabs) {
-    try {
-      await chrome.tabs.sendMessage(tab.id, { type: "DP_CLICK_ALL_FILTER" });
-    } catch {
-      // No content script on this tab yet (still loading) or it's not
-      // currently on the requests list view — just skip it this tick.
-    }
+  // Only the FIRST CRM tab (by the order Chrome reports them — left-to-right
+  // in the tab strip) gets auto-clicked, not every open one — deliberately
+  // the opposite of handleAutoSearch's "always the second tab" above, so
+  // between the two features every CRM tab someone actually works from
+  // stays untouched by this.
+  const tab = tabs[0];
+  if (!tab) return;
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "DP_CLICK_ALL_FILTER" });
+  } catch {
+    // No content script on this tab yet (still loading) or it's not
+    // currently on the requests list view — just skip this tick.
   }
 }

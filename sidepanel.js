@@ -47,6 +47,7 @@ const autoAllToggle         = document.getElementById("dpAutoAllToggle");
 const autoAllIntervalWrap   = document.getElementById("dpAutoAllIntervalWrap");
 const autoAllIntervalInput  = document.getElementById("dpAutoAllInterval");
 const autoAllIntervalValueEl = document.getElementById("dpAutoAllIntervalValue");
+const autoAllCountdownEl    = document.getElementById("dpAutoAllCountdown");
 
 // ── Identity ────────────────────────────────────────────────────────────
 function showSetup() {
@@ -944,7 +945,8 @@ if (dpVersionText) {
 // so it keeps running even if this panel gets closed — all this does is
 // read/write the setting in chrome.storage.local. background.js reacts to
 // the storage change on its own; there's no message to send here.
-const AUTO_ALL_CLICK_KEY = "dpAutoAllClick";
+const AUTO_ALL_CLICK_KEY   = "dpAutoAllClick";
+const AUTO_ALL_CLICK_ALARM = "dpAutoAllClick"; // must match background.js's alarm name
 
 function renderAutoAllUI(settings) {
   if (!autoAllToggle) return;
@@ -955,6 +957,8 @@ function renderAutoAllUI(settings) {
   autoAllIntervalInput.value = String(minutes);
   autoAllIntervalValueEl.textContent = `${minutes} min`;
   autoAllIntervalWrap.style.display = enabled ? "block" : "none";
+
+  if (enabled) startAutoAllCountdown(); else stopAutoAllCountdown();
 }
 
 function saveAutoAllClickSettings() {
@@ -966,12 +970,61 @@ function saveAutoAllClickSettings() {
   });
 }
 
+// ── Countdown to the next auto-click ────────────────────────────────────
+// Reads the actual alarm's scheduledTime straight from chrome.alarms
+// (rather than tracking our own timer here) so the number on screen can
+// never drift out of sync with what background.js is really about to do.
+let autoAllCountdownTimer = null;
+
+function formatCountdown(ms) {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const mm = Math.floor(totalSec / 60);
+  const ss = totalSec % 60;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+
+function tickAutoAllCountdown() {
+  if (!autoAllCountdownEl) return;
+  if (!autoAllToggle.checked) { autoAllCountdownEl.textContent = ""; return; }
+
+  chrome.alarms.get(AUTO_ALL_CLICK_ALARM, alarm => {
+    if (!autoAllToggle.checked) { autoAllCountdownEl.textContent = ""; return; }
+    if (!alarm) { autoAllCountdownEl.textContent = "Starting…"; return; }
+
+    const msLeft = alarm.scheduledTime - Date.now();
+    autoAllCountdownEl.textContent = msLeft <= 500
+      ? "Clicking now…"
+      : `Next click in ${formatCountdown(msLeft)}`;
+  });
+}
+
+function startAutoAllCountdown() {
+  stopAutoAllCountdown();
+  tickAutoAllCountdown();
+  autoAllCountdownTimer = setInterval(tickAutoAllCountdown, 1000);
+}
+
+function stopAutoAllCountdown() {
+  if (autoAllCountdownTimer) { clearInterval(autoAllCountdownTimer); autoAllCountdownTimer = null; }
+  if (autoAllCountdownEl) autoAllCountdownEl.textContent = "";
+}
+
+// Pause the countdown's 1s ticking while the panel is hidden — pointless
+// to keep polling chrome.alarms for a number nobody's looking at — and
+// snap it back up to date the instant the panel is visible again.
+document.addEventListener("visibilitychange", () => {
+  if (!autoAllToggle || !autoAllToggle.checked) return;
+  if (document.visibilityState === "visible") startAutoAllCountdown();
+  else stopAutoAllCountdown();
+});
+
 if (autoAllToggle) {
   chrome.storage.local.get([AUTO_ALL_CLICK_KEY], result => renderAutoAllUI(result[AUTO_ALL_CLICK_KEY]));
 
   autoAllToggle.addEventListener("change", () => {
     autoAllIntervalWrap.style.display = autoAllToggle.checked ? "block" : "none";
     saveAutoAllClickSettings();
+    if (autoAllToggle.checked) startAutoAllCountdown(); else stopAutoAllCountdown();
   });
 
   // "input" fires continuously while dragging — just update the live label
@@ -981,5 +1034,10 @@ if (autoAllToggle) {
   autoAllIntervalInput.addEventListener("input", () => {
     autoAllIntervalValueEl.textContent = `${autoAllIntervalInput.value} min`;
   });
-  autoAllIntervalInput.addEventListener("change", saveAutoAllClickSettings);
+  autoAllIntervalInput.addEventListener("change", () => {
+    saveAutoAllClickSettings();
+    // Give background.js's storage.onChanged listener a beat to actually
+    // re-arm the alarm with the new interval before we read it back.
+    if (autoAllToggle.checked) setTimeout(tickAutoAllCountdown, 300);
+  });
 }
