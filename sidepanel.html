@@ -235,6 +235,9 @@
   .dp-stat-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .dp-stat-total { margin-left: auto; color: #c7cbd8; }
   .dp-stat-total b { color: #00d1b2; }
+  .dp-nextup-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
+  .dp-nextup-row .dp-countdown { margin-top: 0; }
+  #dpAutoAllCountdownCopy { display: none; } /* JS shows this only while Auto-Refresh CRM is on */
 
   /* ── Auto-Refresh CRM: toggle switch + interval slider ── */
   .dp-toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
@@ -390,16 +393,14 @@
           Total <b id="dpStatTotal">0</b>
         </div>
       </div>
+      <div id="dpNextUpRow" class="dp-nextup-row">
+        <span id="dpNextUpLine" class="dp-countdown"></span>
+        <span id="dpAutoAllCountdownCopy" class="dp-countdown"></span>
+      </div>
 
       <hr class="divider">
 
       <button type="button" id="dpSettingsOpenBtn" class="quick-link-btn">⚙ Settings</button>
-
-      <hr class="divider">
-
-      <div class="section-title">Quick Links</div>
-      <a href="https://dp-dashboard-5j9.pages.dev/" target="_blank" class="quick-link-btn">🖥 Open Dashboard</a>
-      <a href="https://docs.google.com/spreadsheets/d/19UgIXRizvOcly1UBKJuQIcKe0s4KuSEPuPUOqc5zN-8/edit?gid=460408169#gid=460408169" target="_blank" class="quick-link-btn">📊 Open Google Sheet</a>
     </div>
 
     <div id="dpFooter">
@@ -415,8 +416,8 @@
 
   <!-- ── Settings drawer: slides up from the bottom, hidden until opened.
        Houses Auto-Refresh CRM + Configuration (moved here from the CRM
-       page's own filter bar). Fixed-position so it overlays everything,
-       including the pinned footer. ── -->
+       page's own filter bar) + Quick Links. Fixed-position so it overlays
+       everything, including the pinned footer. ── -->
   <div id="dpSettingsBackdrop" class="dp-settings-backdrop"></div>
   <div id="dpSettingsDrawer" class="dp-settings-drawer">
     <div class="dp-settings-drawer-handle"></div>
@@ -462,11 +463,16 @@
           </label>
           <span class="dp-toggle-label">Auto-assign new listings (round-robin)</span>
         </div>
-        <div id="dpNextUpLine" class="dp-countdown"></div>
 
         <div class="section-title" style="margin-top:14px;">On duty</div>
         <div id="dpOnDutyList" class="dp-onduty-list"></div>
       </div>
+
+      <hr class="divider">
+
+      <div class="section-title">Quick Links</div>
+      <a href="https://dp-dashboard-5j9.pages.dev/" target="_blank" class="quick-link-btn">🖥 Open Dashboard</a>
+      <a href="https://docs.google.com/spreadsheets/d/19UgIXRizvOcly1UBKJuQIcKe0s4KuSEPuPUOqc5zN-8/edit?gid=460408169#gid=460408169" target="_blank" class="quick-link-btn">📊 Open Google Sheet</a>
 
     </div>
   </div>

@@ -27,6 +27,7 @@ const DP_CATEGORY_FILTER_KEY = "dpCategoryFilter";
 let activeCategoryFilter = "all";
 let currentUserName = null; // set once in showMain — lets tab clicks re-render without re-threading `name` everywhere
 let currentUserRole = null; // "senior" | "junior" — gates the Settings drawer's Auto-assign/On duty rows
+let lastRefreshOk = true; // tracks the ok/fail transition so refreshFromServer only toasts once per outage, not every poll
 
 // ── Elements ────────────────────────────────────────────────────────────
 const setupDiv      = document.getElementById("setup");
@@ -49,6 +50,7 @@ const autoAllIntervalWrap   = document.getElementById("dpAutoAllIntervalWrap");
 const autoAllIntervalInput  = document.getElementById("dpAutoAllInterval");
 const autoAllIntervalValueEl = document.getElementById("dpAutoAllIntervalValue");
 const autoAllCountdownEl    = document.getElementById("dpAutoAllCountdown");
+const autoAllCountdownCopyEl = document.getElementById("dpAutoAllCountdownCopy");
 
 // ── Identity ────────────────────────────────────────────────────────────
 function showSetup() {
@@ -69,6 +71,9 @@ function showMain(name, role) {
 
   const autoAssignSection = document.getElementById("dpAutoAssignSection");
   if (autoAssignSection) autoAssignSection.style.display = role === "senior" ? "block" : "none";
+
+  const nextUpRow = document.getElementById("dpNextUpRow");
+  if (nextUpRow) nextUpRow.style.display = role === "senior" ? "flex" : "none";
 
   renderAssignmentsList(name);
   checkConnection();
@@ -487,15 +492,20 @@ function refreshFromServer(name) {
       // Nothing to show yet at all (first-ever load, no snapshot) — show
       // the error state. Otherwise leave the cached cards up rather than
       // wiping a perfectly good (if slightly stale) view over one failed
-      // refresh, and just let the person know.
+      // refresh. Only toast on the transition INTO failing, not on every
+      // single failed poll — this runs every 5s (see startLivePolling), so
+      // toasting on every failure while Apps Script stays down would just
+      // spam the same message on screen forever instead of showing it once.
       if (currentAssignments.length === 0) {
         listContainer.innerHTML = '<div class="empty-state">Could not load listings.</div>';
-      } else {
+      } else if (lastRefreshOk) {
         showToast("Could not refresh — showing last known data.");
       }
+      lastRefreshOk = false;
       return;
     }
 
+    lastRefreshOk = true;
     currentAssignments = resp.data.assignments.filter(a =>
       a.editor === name && ACTIVE_STATUSES.includes(a.status)
     );
@@ -1068,6 +1078,10 @@ function renderAutoAllUI(settings) {
   autoAllIntervalInput.value = String(minutes);
   autoAllIntervalValueEl.textContent = `${minutes} min`;
   autoAllIntervalWrap.style.display = enabled ? "block" : "none";
+  // The copy next to "Next up" (Today's Activity) only ever appears while
+  // auto-refresh is actually on — no point showing an empty/stale line
+  // there the rest of the time.
+  if (autoAllCountdownCopyEl) autoAllCountdownCopyEl.style.display = enabled ? "inline" : "none";
 
   if (enabled) startAutoAllCountdown(); else stopAutoAllCountdown();
 }
@@ -1085,6 +1099,9 @@ function saveAutoAllClickSettings() {
 // Reads the actual alarm's scheduledTime straight from chrome.alarms
 // (rather than tracking our own timer here) so the number on screen can
 // never drift out of sync with what background.js is really about to do.
+// Written to both autoAllCountdownEl (inside the Settings drawer) and
+// autoAllCountdownCopyEl (the copy next to "Next up" under Today's
+// Activity) every tick, so the two never show different numbers.
 let autoAllCountdownTimer = null;
 
 function formatCountdown(ms) {
@@ -1094,18 +1111,21 @@ function formatCountdown(ms) {
   return `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
+function setAutoAllCountdownText(text) {
+  if (autoAllCountdownEl) autoAllCountdownEl.textContent = text;
+  if (autoAllCountdownCopyEl) autoAllCountdownCopyEl.textContent = text;
+}
+
 function tickAutoAllCountdown() {
   if (!autoAllCountdownEl) return;
-  if (!autoAllToggle.checked) { autoAllCountdownEl.textContent = ""; return; }
+  if (!autoAllToggle.checked) { setAutoAllCountdownText(""); return; }
 
   chrome.alarms.get(AUTO_ALL_CLICK_ALARM, alarm => {
-    if (!autoAllToggle.checked) { autoAllCountdownEl.textContent = ""; return; }
-    if (!alarm) { autoAllCountdownEl.textContent = "Starting…"; return; }
+    if (!autoAllToggle.checked) { setAutoAllCountdownText(""); return; }
+    if (!alarm) { setAutoAllCountdownText("Starting…"); return; }
 
     const msLeft = alarm.scheduledTime - Date.now();
-    autoAllCountdownEl.textContent = msLeft <= 500
-      ? "Clicking now…"
-      : `Next click in ${formatCountdown(msLeft)}`;
+    setAutoAllCountdownText(msLeft <= 500 ? "Clicking now…" : `Next click in ${formatCountdown(msLeft)}`);
   });
 }
 
@@ -1117,7 +1137,7 @@ function startAutoAllCountdown() {
 
 function stopAutoAllCountdown() {
   if (autoAllCountdownTimer) { clearInterval(autoAllCountdownTimer); autoAllCountdownTimer = null; }
-  if (autoAllCountdownEl) autoAllCountdownEl.textContent = "";
+  setAutoAllCountdownText("");
 }
 
 // Pause the countdown's 1s ticking while the panel is hidden — pointless
@@ -1134,6 +1154,7 @@ if (autoAllToggle) {
 
   autoAllToggle.addEventListener("change", () => {
     autoAllIntervalWrap.style.display = autoAllToggle.checked ? "block" : "none";
+    if (autoAllCountdownCopyEl) autoAllCountdownCopyEl.style.display = autoAllToggle.checked ? "inline" : "none";
     saveAutoAllClickSettings();
     if (autoAllToggle.checked) startAutoAllCountdown(); else stopAutoAllCountdown();
   });

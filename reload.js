@@ -199,6 +199,11 @@ const CHANGELOG = [
       { version: 79, notes: [
     "Removed the now-unused toggle-switch CSS left behind on the CRM page from last version's move of Configuration into the side panel.",
   ]},
+      { version: 80, notes: [
+    "Moved Quick Links into the Settings drawer, alongside Auto-Refresh CRM and Configuration.",
+    "Moved \"Next up\" out of the Settings drawer and up to Today's Activity, so the round-robin recommendation is visible without opening the drawer (seniors only, same as before). The Auto-Refresh CRM countdown now also shows a live copy right next to it whenever auto-refresh is turned on.",
+    "Fixed the \"Could not refresh\" warning popping up repeatedly (roughly every 5 seconds) while a refresh kept failing. It now only shows once when a refresh first starts failing, not on every retry after that.",
+  ]},
 ];
 
 const card = document.getElementById("card");
