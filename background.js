@@ -197,6 +197,7 @@ const ASSIGNER_MESSAGE_TYPES = new Set([
   "DP_SET_DOWNLOADED", "DP_SYNC_META", "DP_OPEN_DRIVE_SEARCH",
   "DP_REOPEN_ON_RECATEGORIZE", "DP_OPEN_LISTING_NEW_TAB",
   "DP_SET_AUTO_ASSIGN_ELIGIBILITY", "DP_RESTART_REJECTED",
+  "DP_RESTART_COMPLETED",
 ]);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -311,7 +312,7 @@ const ASSIGNER_WRITE_TYPES = new Set([
   "DP_ASSIGN", "DP_UNASSIGN", "DP_MARK_INPROGRESS", "DP_MARK_COMPLETED",
   "DP_MARK_REJECTED", "DP_SET_ON_HOLD", "DP_SET_DOWNLOADED", "DP_SYNC_META",
   "DP_REOPEN_ON_RECATEGORIZE", "DP_SET_AUTO_ASSIGN_ELIGIBILITY",
-  "DP_RESTART_REJECTED",
+  "DP_RESTART_REJECTED", "DP_RESTART_COMPLETED",
 ]);
 
 // Defense-in-depth: the content script already blocks these actions client
@@ -410,6 +411,17 @@ function dispatchAssignerMessage(message, sendResponse) {
   // rather than leaving it Unassigned for anyone to pick up).
   if (message.type === "DP_RESTART_REJECTED") {
     postToAssignerSheet({ action: "restartRejected", ref: message.ref,
+      title: message.title || "", actionBy: message.actionBy || "" }, sendResponse);
+    return true;
+  }
+
+  // Manual "Restart" click on a Completed listing — always available (not
+  // gated on the "possible re-shoot" detection; that's UI-only, see the
+  // content script). Same shape as the Rejected restart above: reassigns
+  // straight back to the same editor as Assigned, tagged "Re-shoot" — see
+  // the matching Apps Script action for the full rationale.
+  if (message.type === "DP_RESTART_COMPLETED") {
+    postToAssignerSheet({ action: "restartCompleted", ref: message.ref,
       title: message.title || "", actionBy: message.actionBy || "" }, sendResponse);
     return true;
   }

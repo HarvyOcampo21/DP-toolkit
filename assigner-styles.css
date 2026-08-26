@@ -164,6 +164,16 @@
   font-size: 0.75rem;
 }
 
+/* "Possible re-shoot" note — shown on a Completed listing when the CRM's
+   category has come back to a tracked one AND there's an existing
+   thumbnail on file (see rowHasThumbnail/maybeFlagPossibleReshoot). Purely
+   informational, sits next to the always-present Restart button. */
+.dp-reshoot-note {
+  background: rgba(255,167,38,0.15); border: 1px solid #e6941a;
+  color: #e6941a; border-radius: 6px; padding: 3px 8px;
+  font-size: 0.75rem; font-weight: 600; margin-left: 4px; white-space: nowrap;
+}
+
 /* Junior: Start button */
 .dp-start-btn {
   background: rgba(0,209,178,0.15); border: 1px solid #00d1b2;

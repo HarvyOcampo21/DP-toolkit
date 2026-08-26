@@ -501,20 +501,29 @@ function assignerDoPost_impl(p) {
   }
 
   // ── reopenOnCategoryChange ──────────────────────────────────────────────
-  // Handles a specific real-world pattern: a listing gets Rejected or
-  // Completed while its category is one of the tracked ones, a reshoot gets
-  // booked, and eventually the CRM's own category badge advances to a
-  // tracked category again — meaning genuinely new work is now waiting.
+  // Handles a specific real-world pattern: a listing gets Rejected while
+  // its category is one of the tracked ones, a reshoot gets booked, and
+  // eventually the CRM's own category badge advances to a tracked category
+  // again — meaning genuinely new work is now waiting.
   //
-  // Only fires when the *current* assignment status is exactly "Rejected"
-  // or "Completed", and the newly-observed category is any tracked
-  // category — including the SAME one as before (e.g. Photos For QC →
-  // Rejected → Approved → Photos For QC again is a completely normal
-  // rejection/rework cycle, not a bug, and needs to reopen just as much as
-  // a genuine category change does). There's no risk of this firing
-  // repeatedly on every poll: the moment it fires, the newest row for this
-  // Ref flips to "Unassigned", so reopenableFrom is false on every
-  // subsequent check until someone acts on it again.
+  // Only fires when the *current* assignment status is exactly "Rejected",
+  // and the newly-observed category is any tracked category — including
+  // the SAME one as before (e.g. Photos For QC → Rejected → Approved →
+  // Photos For QC again is a completely normal rejection/rework cycle, not
+  // a bug, and needs to reopen just as much as a genuine category change
+  // does). There's no risk of this firing repeatedly on every poll: the
+  // moment it fires, the newest row for this Ref flips to "Unassigned", so
+  // reopenableFrom is false on every subsequent check until someone acts
+  // on it again.
+  //
+  // NOTE: "Completed" used to be reopenable here too, but that meant a
+  // Completed listing coming back (e.g. an agent requesting a reshoot)
+  // silently wrote a brand-new row to the Sheet the moment the CRM's
+  // category advanced — before anyone had actually decided a reshoot was
+  // needed. That's now purely a client-side UI indicator (a "possible
+  // re-shoot" note plus an always-available Restart button — see
+  // assigner-content.js) and the Sheet is only ever touched once a person
+  // deliberately clicks Restart, via the restartCompleted action below.
   //
   // Rather than overwrite the existing row in place, the old row's Status,
   // every timestamp, and every other column stay frozen exactly as they
@@ -546,7 +555,7 @@ function assignerDoPost_impl(p) {
 
     const prevStatus   = ex(ASSIGNER_COL.STATUS);
     const prevCategory = ex(ASSIGNER_COL.CRM_STATUS);
-    const reopenableFrom = prevStatus === "Rejected" || prevStatus === "Completed";
+    const reopenableFrom = prevStatus === "Rejected";
     if (!reopenableFrom) {
       return jsonResponse({ ref: p.ref, reopened: false });
     }
@@ -658,6 +667,56 @@ function assignerDoPost_impl(p) {
       onHoldAt: "", onHoldReason: "",
       assignedBy: restartedByLabel,
       reassignedFrom: "", reassignedTo: "", reassignedBy: "", reassignedAt: "",
+      downloaded: false, downloadedAt: "",
+      title: p.title || ex(ASSIGNER_COL.TITLE),
+      history: historyJson,
+    }));
+    return jsonResponse({ ref: p.ref, restarted: true, editor: prevEditor });
+  }
+
+  // ── restartCompleted ─────────────────────────────────────────────────────
+  // Restart button on a Completed listing — always available (not gated on
+  // detecting the CRM category came back; see assigner-content.js). A
+  // person clicking this on something already marked Completed here is, by
+  // definition, saying "this needs doing again" — same real-world meaning
+  // as the extension's existing "Re-shoot" category (see assign()'s
+  // isReshootJob comment), so the new row is tagged that way too, which is
+  // what makes it show up correctly in the Assignment Dashboard's category
+  // breakdown.
+  //
+  // Same "append a brand-new row, old row completely untouched" shape as
+  // restartRejected — this rework cycle is tracked as its own entry, so
+  // the historical Completed count for the old row/cycle stays accurate
+  // no matter how many times a listing gets reshot. Goes straight back to
+  // the same editor who had it, as Assigned — NOT In Progress; the editor
+  // still hits Start themselves once they actually pick it back up.
+  // Downloaded is reset since whatever was downloaded before belongs to
+  // the old shoot, not the new one.
+  if (p.action === "restartCompleted") {
+    if (ri === -1) return jsonResponse({ ref: p.ref, restarted: false, error: "No existing row" });
+    const prevStatus = ex(ASSIGNER_COL.STATUS);
+    if (prevStatus !== "Completed") return jsonResponse({ ref: p.ref, restarted: false, error: "Not currently Completed" });
+
+    const prevEditor = ex(ASSIGNER_COL.EDITOR);
+    if (!prevEditor) return jsonResponse({ ref: p.ref, restarted: false, error: "No prior editor on file" });
+
+    const restartedByLabel = `Restarted (${p.actionBy || "unknown"})`;
+    let historyJson = ex(ASSIGNER_COL.HISTORY); // old row's history, carried forward as the new row's starting point
+    historyJson = appendHistory(historyJson, {
+      type: "restarted", ts: now.toISOString(), editor: prevEditor, by: p.actionBy || "", reason: "reshoot",
+    });
+    historyJson = appendHistory(historyJson, {
+      type: "assigned", ts: now.toISOString(), editor: prevEditor, by: restartedByLabel,
+    });
+
+    sheet.appendRow(fullRow({
+      editor: prevEditor, status: "Assigned",
+      assignedAt: now, updatedAt: now, unassignedAt: "",
+      startedAt: "", completedAt: "", rejectedAt: "",
+      onHoldAt: "", onHoldReason: "",
+      assignedBy: restartedByLabel,
+      reassignedFrom: "", reassignedTo: "", reassignedBy: "", reassignedAt: "",
+      crmStatus: "Re-shoot",
       downloaded: false, downloadedAt: "",
       title: p.title || ex(ASSIGNER_COL.TITLE),
       history: historyJson,

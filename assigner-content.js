@@ -611,6 +611,29 @@
     }
     return null;
   }
+  // Detects whether the CRM's own listing thumbnail (the small preview
+  // photo on the left of each row) currently shows a real photo versus its
+  // default placeholder. Used only to decide whether the "possible
+  // re-shoot" note is worth showing on a Completed listing that's come
+  // back — a listing with no old photo on file isn't really a case of
+  // "existing photos may be outdated," so the note is skipped (the
+  // Restart button itself is unaffected either way).
+  //
+  // The CRM renders this as a background-image inline style on an
+  // ".entry-image" div, not an <img> tag:
+  //   Real photo:    background-image: url("https://cdn.crm.drivenproperties.com/.../photos/....jpg")
+  //   No photo yet:  background-image: url("https://newcrm.drivenproperties.com/img/default/md.jpg")
+  // so a real thumbnail is anything that isn't that /img/default/ path.
+  function rowHasThumbnail(row) {
+    if (!row) return false;
+    const el = row.querySelector(".entry-image");
+    if (!el) return false;
+    const style = el.getAttribute("style") || "";
+    const match = style.match(/background-image:\s*url\((['"]?)(.*?)\1\)/i);
+    const url = match ? match[2].trim() : "";
+    if (!url) return false;
+    return !/\/img\/default\//i.test(url);
+  }
   function bedroomBucket(n) {
     if (n === null || n === undefined) return null;
     return n >= 5 ? "5+" : String(n);
@@ -927,6 +950,7 @@
       const isActive = status === "Assigned" || status === "In Progress";
       const isOnHold = status === "On Hold";
       const isRejected = status === "Rejected";
+      const isCompleted = status === "Completed";
 
       // Start button on Assigned or On Hold listings (resume from hold).
       // Both roles get full access — junior can act on any listing, just
@@ -955,6 +979,34 @@
         restartBtn.textContent = "Restart";
         restartBtn.title = "Reopen this listing as a new cycle and reassign it back to the same editor";
         restartBtn.addEventListener("click", e => { e.stopPropagation(); restartRejected(); });
+        widget.appendChild(restartBtn);
+      }
+
+      // Completed listings always get a Restart button — clicking it means
+      // "this needs doing again" (a reshoot), regardless of whether we've
+      // detected the CRM category coming back. When we HAVE detected that
+      // (see maybeFlagPossibleReshoot) and there's an existing thumbnail on
+      // file, an extra note calls it out as a possible re-shoot so it's
+      // easy to spot at a glance — no thumbnail just means there's nothing
+      // to compare against, so the note is skipped but Restart still shows.
+      if ((ROLE === "senior" || ROLE === "junior") && isCompleted) {
+        const cameBack = cell.dataset.dpCameBack === "1";
+        if (cameBack) {
+          const parentRow = cell.closest(".table-row.accordion");
+          if (rowHasThumbnail(parentRow)) {
+            const note = document.createElement("span");
+            note.className = "dp-reshoot-note";
+            note.textContent = "Possible re-shoot";
+            note.title = "This listing was completed before and the CRM shows new work waiting — the existing photo on file may be outdated.";
+            widget.appendChild(note);
+          }
+        }
+        const restartBtn = document.createElement("button");
+        restartBtn.type = "button";
+        restartBtn.className = "dp-start-btn";
+        restartBtn.textContent = "Restart";
+        restartBtn.title = "Reopen this listing as a new cycle (re-shoot) and reassign it back to the same editor";
+        restartBtn.addEventListener("click", e => { e.stopPropagation(); restartCompleted(); });
         widget.appendChild(restartBtn);
       }
 
@@ -1277,6 +1329,62 @@
       });
     }
 
+    // Restart on a Completed listing — always available (see renderAssigned),
+    // not gated on the "possible re-shoot" detection. Same shape as
+    // restartRejected: a brand-new row server-side (restartCompleted — see
+    // Apps Script) rather than editing the existing one, straight back to
+    // the same editor as Assigned, never In Progress. Category is tagged
+    // "Re-shoot" (matching restartCompleted's server-side behavior) so it's
+    // reflected locally right away instead of waiting on the next poll.
+    function restartCompleted() {
+      if (!ref) return;
+      if (!window.dpRequireName()) return;
+      const previousEntry = assignmentCache[ref] || null;
+      const editorToRestartTo = previousEntry && previousEntry.editor;
+      if (!editorToRestartTo) {
+        console.log("DP restart: no prior editor on file for", ref, "— nothing to restart to");
+        return;
+      }
+      preserveScrollAround(() => {
+        const now = new Date().toISOString();
+        assignmentCache[ref] = {
+          ...previousEntry, editor: editorToRestartTo, status: "Assigned",
+          assignedAt: now, assignedBy: `Restarted (${MY_NAME})`,
+          startedAt: "", completedAt: "", rejectedAt: "",
+          onHoldAt: "", onHoldReason: "", downloadedAt: "",
+          crmStatus: "Re-shoot",
+        };
+        delete downloadedCache[ref];
+        delete cell.dataset.dpCameBack;
+        lastLocalChangeAt[ref] = Date.now();
+        cell.dataset.dpAppliedEditor = editorToRestartTo;
+        cell.dataset.dpAppliedStatus = "Assigned";
+        renderAssigned(editorToRestartTo, "Assigned");
+        applyFilters();
+
+        safeSendMessage({ type: "DP_RESTART_COMPLETED", ref, title, actionBy: MY_NAME }, resp => {
+          if (!(resp && resp.ok && resp.data && resp.data.restarted)) {
+            console.log("DP restart (completed) failed", resp);
+            verifyBeforeReverting(ref, m => m.status === "Assigned" && m.editor === editorToRestartTo, () => {
+              if (previousEntry) {
+                assignmentCache[ref] = previousEntry;
+                cell.dataset.dpAppliedEditor = previousEntry.editor || "";
+                cell.dataset.dpAppliedStatus = previousEntry.status || "";
+                if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
+                else renderUnassigned();
+              } else {
+                delete assignmentCache[ref];
+                cell.dataset.dpAppliedEditor = "";
+                cell.dataset.dpAppliedStatus = "";
+                renderUnassigned();
+              }
+              lastLocalChangeAt[ref] = Date.now();
+              applyFilters();
+            }, "Could not restart this listing — reverted.");
+          }
+        });
+      });
+    }
 
     // Senior only — put a listing on hold with a reason.
     function setOnHold(reason) {
@@ -1428,22 +1536,27 @@
     });
   }
 
-  // Auto-reopens a Rejected or Completed listing once the CRM's own
-  // category genuinely advances (e.g. a reshoot's photos land in Upload
-  // Pending after a rejection, or an agent requests updated photos of a
-  // listing that was already Completed). The Apps Script side
-  // (reopenOnCategoryChange) has always been able to do this — it's wired
-  // all the way through background.js — but nothing ever actually called
-  // it from here, so a listing just sat showing "Rejected"/"Completed"
-  // forever even after real new work showed up. syncMetaIfNeeded above
-  // deliberately won't help with this: once a category is captured it's
-  // locked in for good, by design, so the only way to notice "this
-  // category actually changed" is to compare the *live* DOM value against
-  // what's on file every pass, which is exactly what this does.
+  // Auto-reopens a Rejected listing once the CRM's own category genuinely
+  // advances (e.g. a reshoot's photos land in Upload Pending after a
+  // rejection). The Apps Script side (reopenOnCategoryChange) has always
+  // been able to do this — it's wired all the way through background.js —
+  // but nothing ever actually called it from here, so a listing just sat
+  // showing "Rejected" forever even after real new work showed up.
+  // syncMetaIfNeeded above deliberately won't help with this: once a
+  // category is captured it's locked in for good, by design, so the only
+  // way to notice "this category actually changed" is to compare the
+  // *live* DOM value against what's on file every pass, which is exactly
+  // what this does.
+  //
+  // Deliberately Rejected-only. A Completed listing's category coming back
+  // is surfaced purely as a UI hint (see maybeFlagPossibleReshoot below) —
+  // never an automatic Sheet write. The Restart button on a Completed
+  // listing is always available regardless of this detection; this only
+  // drives the extra "possible re-shoot" note.
   function maybeReopenOnRecategorize(ref, liveCrmStatus, title) {
     if (!ref || !liveCrmStatus) return;
     const entry = assignmentCache[ref];
-    if (!entry || (entry.status !== "Rejected" && entry.status !== "Completed")) return;
+    if (!entry || entry.status !== "Rejected") return;
     if (!CATEGORY_OPTIONS.includes(liveCrmStatus)) return;
     if (liveCrmStatus === entry.crmStatus) return; // nothing's actually changed
 
@@ -1469,6 +1582,25 @@
         processRows();
       }
     );
+  }
+
+  // Purely visual counterpart of the above, for Completed listings. Never
+  // touches the Sheet — just flags the row (cell.dataset.dpCameBack) once
+  // the CRM's own category has genuinely advanced to a tracked category
+  // again since this listing was completed, so renderAssigned can show a
+  // "possible re-shoot" note alongside the (always-present) Restart
+  // button. Restart itself only writes to the Sheet when a person actually
+  // clicks it — see restartCompleted().
+  function maybeFlagPossibleReshoot(ref, cell, liveCrmStatus) {
+    if (!ref || !cell) return;
+    const entry = assignmentCache[ref];
+    const cameBack = !!(entry && entry.status === "Completed" &&
+      liveCrmStatus && CATEGORY_OPTIONS.includes(liveCrmStatus) && liveCrmStatus !== entry.crmStatus);
+    const flag = cameBack ? "1" : "0";
+    if (cell.dataset.dpCameBack !== flag) {
+      cell.dataset.dpCameBack = flag;
+      cell.__dpRenderStatus && cell.__dpRenderStatus();
+    }
   }
 
   function processRows() {
@@ -1516,6 +1648,10 @@
         // for every row that doesn't need it, so calling it unconditionally
         // here is safe.
         maybeAutoAssign(ref, existingCell, crmStatus);
+        // Called every pass too, same reasoning as maybeAutoAssign just
+        // above — a Completed listing's category can come back at any
+        // time while this tab sits open, not just on a status change.
+        maybeFlagPossibleReshoot(ref, existingCell, crmStatus);
         // Independent of the change-check above — expanding an already-
         // rendered row reveals new .preview-body-wrap cards via a DOM
         // mutation, not a status change, so it wouldn't otherwise trigger
@@ -1541,6 +1677,7 @@
       // get styled immediately, not just after a later status change.
       newCell.__dpRenderStatus && newCell.__dpRenderStatus();
       maybeAutoAssign(ref, newCell, crmStatus);
+      maybeFlagPossibleReshoot(ref, newCell, crmStatus);
     });
 
     if (currentSort === "asc" || currentSort === "desc") applySort();
@@ -3016,7 +3153,8 @@
           case "onhold":
             return e.reason ? `Reason: ${e.reason}` : null;
           case "restarted":
-            return e.by ? `By: ${e.by}` : null;
+            return [e.reason === "reshoot" ? "Re-shoot" : null, e.by ? `By: ${e.by}` : null]
+              .filter(Boolean).join("  \u00b7  ") || null;
           case "downloaded":
             return e.editor ? `By: ${e.editor}` : null;
           case "downloaded_cleared":

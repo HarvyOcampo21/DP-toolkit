@@ -204,6 +204,10 @@ const CHANGELOG = [
     "Moved \"Next up\" out of the Settings drawer and up to Today's Activity, so the round-robin recommendation is visible without opening the drawer (seniors only, same as before). The Auto-Refresh CRM countdown now also shows a live copy right next to it whenever auto-refresh is turned on.",
     "Fixed the \"Could not refresh\" warning popping up repeatedly (roughly every 5 seconds) while a refresh kept failing. It now only shows once when a refresh first starts failing, not on every retry after that.",
   ]},
+      { version: 81, notes: [
+    "Completed listings now always show a Restart button, for when new work comes in on something already finished (e.g. an agent requests a reshoot). Restart hands it straight back to the same editor as Assigned — same behavior as the existing Restart on Rejected listings — and is tracked as its own new entry, so your Completed counts stay accurate.",
+    "When a Completed listing's CRM category has genuinely come back with new work AND it still has an existing photo on file, you'll now also see a \u201cPossible re-shoot\u201d note next to it \u2014 a heads-up that the current thumbnail may be outdated. This is purely informational and doesn't touch the Sheet on its own \u2014 nothing is logged until you actually click Restart.",
+  ]},
 ];
 
 const card = document.getElementById("card");
