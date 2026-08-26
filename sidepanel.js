@@ -668,7 +668,7 @@ function buildAssignCard(a, name) {
   if (a.status === "Assigned" || a.status === "On Hold") {
     actionsRow.appendChild(mkActionBtn("Start", "ac-start-btn", () => {
       applyOptimisticUpdate(a, name, { status: "In Progress" },
-        () => dpSendAction("DP_MARK_INPROGRESS", { ref: a.ref, title: a.title }));
+        "DP_MARK_INPROGRESS", { ref: a.ref, title: a.title }, "Could not mark In Progress — reverted.");
     }));
   }
 
@@ -676,7 +676,7 @@ function buildAssignCard(a, name) {
     actionsRow.appendChild(mkActionBtn("Hold", "ac-hold-btn", () => {
       showOnHoldModal("", "edit", reason => {
         applyOptimisticUpdate(a, name, { status: "On Hold", onHoldReason: reason },
-          () => dpSendAction("DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }));
+          "DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }, "Could not set on hold — reverted.");
       });
     }, "Put on hold with reason"));
   }
@@ -685,7 +685,7 @@ function buildAssignCard(a, name) {
     actionsRow.appendChild(mkActionBtn("View Reason", "ac-reason-btn", () => {
       showOnHoldModal(a.onHoldReason || "", "edit", reason => {
         applyOptimisticUpdate(a, name, { onHoldReason: reason },
-          () => dpSendAction("DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }));
+          "DP_SET_ON_HOLD", { ref: a.ref, reason, title: a.title }, "Could not update hold reason — reverted.");
       });
     }, "See why this listing is on hold"));
   }
@@ -752,11 +752,18 @@ function buildAssignCard(a, name) {
     const downloadedAt = val ? new Date().toISOString() : "";
     a.downloaded = val;
     saveSnapshot(name);
-    dpSendAction("DP_SET_DOWNLOADED", { ref: a.ref, downloaded: val, downloadedAt, title: a.title }, () => {
+    const revert = () => {
       a.downloaded = !val;
       downloadedCheckbox.checked = !val;
       saveSnapshot(name);
-    });
+    };
+    chrome.runtime.sendMessage(
+      { type: "DP_SET_DOWNLOADED", ref: a.ref, downloaded: val, downloadedAt, title: a.title },
+      resp => {
+        if (resp && resp.ok) return;
+        verifyBeforeReverting(a.ref, row => !!row.downloaded === val, revert, "Could not save downloaded status — reverted.");
+      }
+    );
   });
   const downloadedText = document.createElement("span");
   downloadedText.textContent = "Downloaded";
@@ -795,35 +802,68 @@ const ICON_DRIVE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" 
 const ICON_HISTORY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
 const ICON_COPY = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
 
-// ── Optimistic update: mutate the local assignment, re-render its card
-// immediately, THEN talk to the server. Mirrors exactly what the CRM page's
-// content script does (see markInProgress/setOnHold there) — the person
-// sees the change the instant they click, instead of waiting on a round
-// trip that (per past Apps Script latency issues) can lag a couple seconds
-// behind the write actually landing. Reverts the local mutation and
-// re-renders again if the write comes back failed.
-function applyOptimisticUpdate(a, name, patch, sendFn) {
-  const previous = { ...a };
-  Object.assign(a, patch);
-  refreshCard(a, name);
-  sendFn(() => {
-    Object.assign(a, previous);
-    refreshCard(a, name);
+// ── Optimistic update + verify-before-revert ────────────────────────────
+// Mirrors verifyBeforeReverting in assigner-content.js exactly, same
+// constants and all, so both surfaces give a write the same amount of
+// grace before actually reverting anything. Confirmed real behavior (not
+// a guess): Apps Script's write itself can succeed correctly while the
+// HTTP response delivery back to the browser still flakes — so a "failed"
+// response here does NOT reliably mean the write didn't happen. Reverting
+// on the very first failed response, as this used to, produces exactly
+// the reported symptom: card flashes back, then the CRM tab's own poll
+// shows it went through fine all along.
+//
+// A single immediate recheck isn't enough either: the server's write lock
+// can legitimately still be holding the actual write seconds after this
+// tab already gave up waiting, so a recheck fired the instant that
+// happens can catch it mid-flight and revert on a false negative. This
+// retries every 5s for up to ~45s before actually giving up.
+const DP_VERIFY_MAX_ATTEMPTS = 10;    // 1 immediate + 9 retries
+const DP_VERIFY_RETRY_DELAY_MS = 5000; // ~45s of extra patience beyond the immediate check
+
+function verifyBeforeReverting(ref, matches, revert, failureMessage, attempt = 0) {
+  chrome.runtime.sendMessage({ type: "DP_GET_ALL" }, verifyResp => {
+    // .filter().pop(), not .find() — a Ref can have more than one row (see
+    // reopenOnCategoryChange/restartRejected/restartCompleted server-side),
+    // and rows are always appended after the ones they follow, so the last
+    // match is always the current cycle.
+    const match = verifyResp && verifyResp.ok && verifyResp.data && Array.isArray(verifyResp.data.assignments)
+      ? verifyResp.data.assignments.filter(x => x.ref === ref).pop()
+      : null;
+
+    if (match && matches(match)) return; // it actually went through — leave the UI exactly as-is, no revert, no toast
+
+    if (attempt < DP_VERIFY_MAX_ATTEMPTS - 1) {
+      setTimeout(() => verifyBeforeReverting(ref, matches, revert, failureMessage, attempt + 1), DP_VERIFY_RETRY_DELAY_MS);
+      return;
+    }
+
+    // Genuinely didn't happen after every retry — now actually revert and say so.
+    revert();
+    showToast(failureMessage || "Action failed — please try again.");
   });
 }
 
-// ── Sending a write action to background.js ─────────────────────────────
-// Every write (Start/Hold/Downloaded) goes through the same background.js
-// handlers the CRM content script already uses, so behavior (name-required
-// guard, Sheet writes, history logging) stays identical between the two
-// surfaces. Purely fire-and-verify here — the caller already updated the
-// UI optimistically and only needs to know if it must be rolled back.
-function dpSendAction(type, payload, onFailure) {
+// Applies `patch` to the card's local data and re-renders it INSTANTLY —
+// same "surface changes immediately" behavior the CRM tab's own optimistic
+// updates already have — then fires the matching write. Only ever falls
+// through to verifyBeforeReverting if that write's own response comes back
+// not-ok; a normal successful response needs no further checking at all.
+function applyOptimisticUpdate(a, name, patch, type, payload, failureMessage) {
+  const previous = { ...a };
+  Object.assign(a, patch);
+  refreshCard(a, name);
+
+  // Only checks the fields actually in `patch` — a broader equality check
+  // would false-negative on fields this particular action never touched
+  // (e.g. crmStatus drifting from an unrelated CRM-side change landing
+  // server-side in between our optimistic update and this check).
+  const matches = row => Object.keys(patch).every(k => (row[k] || "") === (patch[k] || ""));
+  const revert = () => { Object.assign(a, previous); refreshCard(a, name); };
+
   chrome.runtime.sendMessage({ type, ...payload }, resp => {
-    if (!resp || !resp.ok) {
-      showToast((resp && resp.error) || "Action failed — please try again.");
-      if (onFailure) onFailure();
-    }
+    if (resp && resp.ok) return;
+    verifyBeforeReverting(a.ref, matches, revert, failureMessage);
   });
 }
 

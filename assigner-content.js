@@ -328,8 +328,8 @@
   // this retries a few times with a short gap before giving up, giving a
   // slow-but-real write room to land instead of declaring failure on the
   // first snapshot that happens to be too early.
-  const VERIFY_MAX_ATTEMPTS = 4;   // 1 immediate + 3 retries
-  const VERIFY_RETRY_DELAY_MS = 3000; // ~9s of extra patience beyond the immediate check
+  const VERIFY_MAX_ATTEMPTS = 10;   // 1 immediate + 9 retries
+  const VERIFY_RETRY_DELAY_MS = 5000; // ~45s of extra patience beyond the immediate check — same window sidepanel.js's own verifyBeforeReverting uses, so both surfaces give a write the same amount of grace before actually reverting
   function verifyBeforeReverting(ref, expectedStatusOrPredicate, doRevert, failureMessage, attempt = 0) {
     const matches = typeof expectedStatusOrPredicate === "function"
       ? expectedStatusOrPredicate

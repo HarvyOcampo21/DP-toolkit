@@ -217,6 +217,9 @@ const CHANGELOG = [
     "Every assignment action (assign, start, complete, reject, hold, downloaded, restart, etc.) now immediately pushes a refresh out to every open CRM tab AND the side panel the moment it lands in the Sheet, rather than waiting on each one's own next poll. Do something on the CRM tab and the side panel updates almost instantly, and vice versa.",
     "DP_GET_ALL and every write to the Sheet now explicitly bypass the browser's HTTP cache (cache: \"no-store\"), on top of the endpoint already being uncached server-side \u2014 belt-and-suspenders to guarantee every read and write is a genuine live round-trip, never a stale cached response.",
   ]},
+      { version: 84, notes: [
+    "The side panel's Start/Hold/Downloaded buttons now give a write the same ~45 seconds of patience as the CRM tab already does before actually reverting anything on a failed response, instead of snapping back to the old value on the very first flaky reply. Apps Script's write can genuinely still succeed even when the response back to the browser fails, so this checks a few more times over that window before concluding it truly didn't go through.",
+  ]},
 ];
 
 const card = document.getElementById("card");
