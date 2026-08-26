@@ -208,6 +208,15 @@ const CHANGELOG = [
     "Completed listings now always show a Restart button, for when new work comes in on something already finished (e.g. an agent requests a reshoot). Restart hands it straight back to the same editor as Assigned — same behavior as the existing Restart on Rejected listings — and is tracked as its own new entry, so your Completed counts stay accurate.",
     "When a Completed listing's CRM category has genuinely come back with new work AND it still has an existing photo on file, you'll now also see a \u201cPossible re-shoot\u201d note next to it \u2014 a heads-up that the current thumbnail may be outdated. This is purely informational and doesn't touch the Sheet on its own \u2014 nothing is logged until you actually click Restart.",
   ]},
+      { version: 82, notes: [
+    "Auto-assign now only ever fires from the first CRM tab (left-to-right in the tab strip) when more than one is open in the same browser, instead of every open tab independently racing to assign the same fresh listing. If that tab gets closed, the next CRM tab in line automatically takes over within a few seconds \u2014 nothing to reconfigure.",
+    "Force Sync in the side panel now also pushes an immediate refresh into every open CRM tab, not just the side panel's own list \u2014 so a tab that's been sitting in the background catches up right away instead of waiting on its next scheduled poll.",
+  ]},
+      { version: 83, notes: [
+    "The side panel now polls at the same rate as the CRM tab \u2014 3s while it's actually visible, 15s in the background \u2014 instead of a flat 5s only while visible and nothing at all while hidden.",
+    "Every assignment action (assign, start, complete, reject, hold, downloaded, restart, etc.) now immediately pushes a refresh out to every open CRM tab AND the side panel the moment it lands in the Sheet, rather than waiting on each one's own next poll. Do something on the CRM tab and the side panel updates almost instantly, and vice versa.",
+    "DP_GET_ALL and every write to the Sheet now explicitly bypass the browser's HTTP cache (cache: \"no-store\"), on top of the endpoint already being uncached server-side \u2014 belt-and-suspenders to guarantee every read and write is a genuine live round-trip, never a stale cached response.",
+  ]},
 ];
 
 const card = document.getElementById("card");

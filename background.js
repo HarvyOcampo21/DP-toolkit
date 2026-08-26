@@ -235,6 +235,48 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
     return true;
   }
+
+  // ── Auto-assign leader election ─────────────────────────────────────────
+  // "First CRM tab" = tabs[0] out of every currently-open tab matching
+  // /photorequest/*, in the same left-to-right tab-strip order
+  // chrome.tabs.query already returns elsewhere in this file (see
+  // handleAutoSearch's "second CRM tab" targeting above) — so this reuses
+  // the exact same notion of tab ordering the extension already has,
+  // rather than inventing a new one. No registration list to maintain:
+  // each content script just asks "is it currently me?" on its own poll
+  // cadence (see checkAutoAssignLeadership in assigner-content.js), and
+  // chrome.tabs.query always reflects tabs that are actually open right
+  // now — a closed leader tab simply stops appearing, so the next tab in
+  // strip order becomes tabs[0] and answers "yes" on its very next check.
+  if (message.type === "DP_CHECK_AUTO_ASSIGN_LEADER") {
+    (async () => {
+      try {
+        const myTabId = _sender && _sender.tab && _sender.tab.id;
+        const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
+        const leaderTabId = tabs.length ? tabs[0].id : null;
+        sendResponse({ ok: true, isLeader: myTabId != null && myTabId === leaderTabId });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  // ── Force Sync (side panel) ─────────────────────────────────────────────
+  // The side panel's own Force Sync button already re-fetches its own
+  // list directly — this just additionally pushes an out-of-cycle
+  // refreshAssignments() into every open CRM tab, so a stale-looking board
+  // in a tab that's been sitting in the background doesn't need its own
+  // person to notice and manually refresh it. Best-effort per tab: a tab
+  // mid-navigation (content script briefly detached) just misses this one
+  // push and catches up on its own next poll a few seconds later anyway.
+  if (message.type === "DP_FORCE_SYNC_ALL") {
+    (async () => {
+      const tabsSynced = await pushForceRefreshToCrmTabs();
+      sendResponse({ ok: true, tabsSynced });
+    })();
+    return true;
+  }
 });
 
 // Same DP_AUTO_SEARCH flow as above, but reachable from outside the
@@ -298,10 +340,54 @@ function postToAssignerSheet(body, sendResponse) {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ ...body, token: ASSIGNER_CONFIG.TOKEN }),
+    cache: "no-store",
   })
     .then(r => r.json())
-    .then(data => sendResponse({ ok: !data.error, data, error: data.error }))
+    .then(data => {
+      sendResponse({ ok: !data.error, data, error: data.error });
+      // Push a live refresh out to every CRM tab + the side panel the
+      // moment this write actually lands — see broadcastDataChanged's own
+      // comment for the full rationale. Fire-and-forget: never lets a
+      // broadcast hiccup affect the response already sent above.
+      if (!data.error) broadcastDataChanged();
+    })
     .catch(err => sendResponse({ ok: false, error: String(err) })));
+}
+
+// Every open CRM tab, told to run an immediate out-of-cycle
+// refreshAssignments() pass rather than waiting for its own next poll
+// tick. Shared by the manual Force Sync button (DP_FORCE_SYNC_ALL below)
+// and the automatic post-write broadcast (broadcastDataChanged) so both
+// paths push through the exact same mechanism.
+async function pushForceRefreshToCrmTabs() {
+  const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
+  await Promise.all(tabs.map(tab =>
+    chrome.tabs.sendMessage(tab.id, { type: "DP_FORCE_REFRESH" }).catch(() => {})
+  ));
+  return tabs.length;
+}
+
+// Fires automatically after every successful assigner write (see
+// postToAssignerSheet above) — assign, unassign, start, complete, reject,
+// hold, downloaded, restart, all of it — so a change made in one place
+// (a CRM tab, or this side panel, by this editor or any other) shows up
+// everywhere else within roughly a second, rather than everyone
+// independently waiting out their own next poll tick (up to 3s on a
+// focused tab, up to 15s on a backgrounded one). The regular poll loops
+// stay in place underneath this as the reliable fallback — this is purely
+// a "don't make people wait for it" accelerant, not a replacement.
+async function broadcastDataChanged() {
+  try { await pushForceRefreshToCrmTabs(); } catch (e) { /* non-fatal */ }
+  // chrome.tabs.sendMessage above only reaches content scripts — the side
+  // panel is an extension page, not a tab, so it needs the separate
+  // chrome.runtime.sendMessage broadcast instead (see the DP_FORCE_REFRESH
+  // listener in sidepanel.js). No listener currently open (panel closed)
+  // just means "Could not establish connection" here, which is expected
+  // and harmless — reading chrome.runtime.lastError in the callback
+  // prevents it surfacing as an unhandled error in the console.
+  try {
+    chrome.runtime.sendMessage({ type: "DP_FORCE_REFRESH" }, () => void chrome.runtime.lastError);
+  } catch (e) { /* non-fatal */ }
 }
 
 // Actions that write an editor-attributed row/change to the Sheet — these
@@ -335,7 +421,11 @@ function handleAssignerMessage(message, sendResponse) {
 
 function dispatchAssignerMessage(message, sendResponse) {
   if (message.type === "DP_GET_ALL") {
-    fetchWithTimeout(buildAssignerGetUrl())
+    // cache: "no-store" — belt-and-suspenders on top of Apps Script's own
+    // uncached response headers, so this can never be served from the
+    // browser's HTTP cache regardless of what those headers say. Every
+    // DP_GET_ALL is a genuine live round-trip to the Sheet, always.
+    fetchWithTimeout(buildAssignerGetUrl(), { cache: "no-store" })
       .then(r => r.json())
       .then(data => sendResponse({ ok: !data.error, data, error: data.error }))
       .catch(err => sendResponse({ ok: false, error: String(err) }));

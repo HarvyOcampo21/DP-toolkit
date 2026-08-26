@@ -147,8 +147,18 @@
   // assign() codepath a senior clicking a popover option would hit —
   // optimistic local update, write to the Sheet, verify-before-reverting
   // on a flaky response — via the __dpAssign hook renderAssignCell exposes.
+  // With more than one CRM tab open in this same browser, only the
+  // "first" one — see checkAutoAssignLeadership below — is allowed to fire
+  // auto-assign writes at all, so two tabs racing to assign the same
+  // brand-new listing is no longer really possible within one browser.
+  // (This doesn't extend across separate machines/browser profiles — each
+  // has no visibility into the other's open tabs — so the jitter below
+  // still matters as a cross-machine safety net, same as before.)
+  // isAutoAssignLeaderTab is re-checked on every poll (~3-15s cadence,
+  // same as everything else here) rather than just once on load, so
+  // leadership correctly hands off if the leader tab gets closed.
   function maybeAutoAssign(ref, cell, crmStatus) {
-    if (!autoAssignEnabled || !autoAssignArmed) return;
+    if (!autoAssignEnabled || !autoAssignArmed || !isAutoAssignLeaderTab) return;
     if (ROLE !== "senior" || !MY_NAME) return;
     if (!ref || !cell || typeof cell.__dpAssign !== "function") return;
     if (!AUTO_ASSIGN_ELIGIBLE_STATUSES.includes(crmStatus)) return; // not fresh incoming work
@@ -156,19 +166,13 @@
     if (entry && isActiveStatus(entry.status)) return; // already spoken for
     if (autoAssignInFlight.has(ref)) return;
     autoAssignInFlight.add(ref);
-    // With more than one senior tab/machine watching the same board, two
-    // tabs can both notice the same brand-new Unassigned listing within
-    // the same instant and each independently decide to auto-assign it —
-    // there's no shared lock between separate browser sessions. A short
-    // randomized delay, plus a fresh eligibility check right before the
-    // write actually fires, staggers that: whichever tab's poll or DOM
-    // update reflects the other tab's assignment first will see this ref
-    // is no longer eligible and quietly back off, instead of both writing
-    // to the same ref at once. Doesn't make the race impossible (that
-    // would need a real server-side lock across tabs), but makes it very
-    // unlikely in practice, and any write that does still race is caught
-    // by the normal poll-and-converge behavior everything else here
-    // already relies on.
+    // Kept as a second, cheap safety net for the cross-machine case above
+    // — a short randomized delay plus a fresh eligibility check right
+    // before the write actually fires, staggers separate browsers/editors
+    // that each independently decide to auto-assign the same fresh
+    // listing at once: whichever one's poll or DOM update reflects the
+    // other's assignment first will see this ref is no longer eligible
+    // and quietly back off.
     const jitterMs = 300 + Math.floor(Math.random() * 1500);
     setTimeout(() => {
       const fresh = assignmentCache[ref];
@@ -191,6 +195,23 @@
       // of being stuck "in flight" forever.
       setTimeout(() => autoAssignInFlight.delete(ref), 15000);
     }, jitterMs);
+  }
+
+  // Asks the background worker whether THIS tab is the "first CRM tab" —
+  // i.e. tabs[0] out of every currently-open tab matching the /photorequest/*
+  // pattern, in the same left-to-right tab-strip order chrome.tabs.query
+  // already uses elsewhere in this extension (see handleAutoSearch's
+  // "second CRM tab" targeting in background.js). Only that one tab is
+  // allowed to actually fire auto-assign writes — see maybeAutoAssign
+  // above. Cheap enough (one small message round-trip, no Sheet access) to
+  // just call every poll cycle rather than maintain any registration
+  // state of our own; if the answer comes back different from before, we
+  // don't need to do anything special either way — maybeAutoAssign just
+  // reads the current value on its next call.
+  function checkAutoAssignLeadership() {
+    safeSendMessage({ type: "DP_CHECK_AUTO_ASSIGN_LEADER" }, resp => {
+      isAutoAssignLeaderTab = !!(resp && resp.ok && resp.isLeader);
+    });
   }
 
   const PROCESS_DEBOUNCE_MS = 150;
@@ -223,6 +244,12 @@
   // Round-robin auto-assign — see the "── Round-robin auto-assign ──"
   // section below for the recommendation/assignment logic itself.
   let autoAssignEnabled = false;
+  // Whether THIS tab is currently the designated "first CRM tab" — the
+  // only tab allowed to actually fire auto-assign writes when the toggle
+  // is on. See checkAutoAssignLeadership below. Starts false (same
+  // fail-safe direction as autoAssignEnabled itself) so a tab never
+  // auto-assigns before it's actually confirmed leadership.
+  let isAutoAssignLeaderTab = false;
   // Stays false until the very first Apps Script fetch has come back and
   // been rendered once. Without this, turning the toggle on would, on
   // page load, treat every listing that's been sitting Unassigned for
@@ -469,6 +496,20 @@
       if (message && message.type === "DP_FILL_SEARCH") {
         try {
           fillAndTriggerCrmSearch(message.ref);
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: String(err && err.message || err) });
+        }
+        return true;
+      }
+      // Pushed from the background worker when someone hits Force Sync in
+      // the side panel — see DP_FORCE_SYNC_ALL there. Just runs a normal
+      // out-of-cycle refreshAssignments() pass; DP_GET_ALL is already
+      // fully uncached server-side (see appscript.js), so there's nothing
+      // extra to bypass here beyond just not waiting for the next poll tick.
+      if (message && message.type === "DP_FORCE_REFRESH") {
+        try {
+          refreshAssignments();
           sendResponse({ ok: true });
         } catch (err) {
           sendResponse({ ok: false, error: String(err && err.message || err) });
@@ -2036,6 +2077,11 @@
   function refreshAssignments() {
     if (refreshInFlight) return;
     refreshInFlight = true;
+
+    // Independent of the DP_GET_ALL round-trip below — see
+    // checkAutoAssignLeadership's own comment for why this piggybacks on
+    // the regular poll cadence instead of its own timer.
+    checkAutoAssignLeadership();
 
     safeSendMessage({ type: "DP_GET_ALL" }, resp => {
       refreshInFlight = false;

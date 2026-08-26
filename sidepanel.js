@@ -7,7 +7,6 @@ const NAME_ROLES = {
   Harvy:   "senior",
   Mark:    "senior",
   Sudheep: "senior",
-  Jabir: "senior",
 };
 function roleForName(name) {
   return NAME_ROLES[name] || "junior"; // unknown names default to the safer role
@@ -86,30 +85,60 @@ function showMain(name, role) {
 // the CRM tab, not from this panel — so without this, a just-completed
 // listing would keep sitting in "Active assignments" here until someone
 // happened to reopen the panel or hit Force Sync. Polling in the background
-// means it drops off on its own within a few seconds, same spirit as the
-// CRM board's own ~3s active refresh (see v34 in the changelog). Paused
-// while the panel is hidden so it doesn't burn requests for no one to see,
-// and it re-syncs immediately the moment it's looked at again.
-const DP_POLL_INTERVAL_MS = 5000;
+// means it drops off on its own within a few seconds.
+//
+// Same dual-rate shape as the CRM tab's own polling (see REFRESH_INTERVAL_MS/
+// BACKGROUND_REFRESH_INTERVAL_MS in assigner-content.js): a fast 3s rate
+// while the panel is actually visible, backing off to a slower 15s
+// keep-alive rate while it's hidden rather than stopping entirely — so a
+// panel sitting open-but-unfocused still catches up within 15s on its own,
+// on top of the near-instant push refresh every write already triggers
+// (see the DP_FORCE_REFRESH listener below). Switching back to visible
+// snaps straight back to the fast rate with an immediate refresh, no stale
+// wait.
+const DP_ACTIVE_POLL_INTERVAL_MS = 3000;
+const DP_BACKGROUND_POLL_INTERVAL_MS = 15000;
 let dpPollTimer = null;
 
 function startLivePolling(name) {
   stopLivePolling();
-  dpPollTimer = setInterval(() => {
-    if (document.visibilityState === "visible") refreshFromServer(name);
-  }, DP_POLL_INTERVAL_MS);
+  const interval = document.visibilityState === "visible"
+    ? DP_ACTIVE_POLL_INTERVAL_MS
+    : DP_BACKGROUND_POLL_INTERVAL_MS;
+  dpPollTimer = setInterval(() => refreshFromServer(name), interval);
 }
 
 function stopLivePolling() {
   if (dpPollTimer) { clearInterval(dpPollTimer); dpPollTimer = null; }
 }
 
+// Restarts the poll loop at the rate matching the new visibility state
+// (see startLivePolling) every time it changes, plus an immediate refresh
+// on the transition back to visible so there's no stale wait after
+// switching back — same pattern assigner-content.js uses for CRM tabs.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
   chrome.storage.local.get(["myName"], ({ myName }) => {
-    if (myName) refreshFromServer(myName);
+    if (!myName) return;
+    startLivePolling(myName);
+    if (document.visibilityState === "visible") refreshFromServer(myName);
   });
 });
+
+// Pushed from the background worker the moment ANY write actually lands in
+// the Sheet — from this panel, a CRM tab, or another editor entirely (see
+// broadcastDataChanged in background.js). This is what makes an action
+// taken on the CRM tab (assign/complete/reject/hold) show up here almost
+// immediately instead of waiting up to 3s for the next poll tick, and the
+// same in reverse for actions taken from this panel (Start/Hold/Downloaded).
+if (chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.type === "DP_FORCE_REFRESH") {
+      chrome.storage.local.get(["myName"], ({ myName }) => {
+        if (myName) refreshFromServer(myName);
+      });
+    }
+  });
+}
 
 saveBtn.addEventListener("click", () => {
   const name = nameSelect.value;
@@ -1037,7 +1066,10 @@ async function checkConnection() {
 // for exactly the kind of situation where something's written locally but
 // doesn't seem to be landing in the Sheet, and a person wants to force a
 // fresh look at what's actually true right now rather than wait for the
-// next scheduled poll.
+// next scheduled poll. Also pushes the same out-of-cycle refresh into
+// every open CRM tab (see DP_FORCE_SYNC_ALL in background.js) — previously
+// this only ever refreshed the side panel's own list, so a stale-looking
+// CRM tab needed its own manual refresh even after hitting this button.
 const dpForceSyncBtn = document.getElementById('dpForceSyncBtn');
 if (dpForceSyncBtn) {
   dpForceSyncBtn.addEventListener('click', async () => {
@@ -1045,6 +1077,13 @@ if (dpForceSyncBtn) {
     dpForceSyncBtn.textContent = 'Syncing…';
 
     await checkConnection();
+
+    // Fire-and-forget from the panel's perspective — worst case (e.g. no
+    // CRM tabs currently open) is simply a no-op, nothing here should ever
+    // block or fail the side panel's own refresh below.
+    try {
+      chrome.runtime.sendMessage({ type: 'DP_FORCE_SYNC_ALL' }, () => void chrome.runtime.lastError);
+    } catch (e) { /* non-fatal */ }
 
     chrome.storage.local.get(['myName'], ({ myName }) => {
       if (myName) {
