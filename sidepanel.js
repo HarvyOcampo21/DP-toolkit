@@ -26,6 +26,7 @@ const CATEGORY_FILTERS = [
 const DP_CATEGORY_FILTER_KEY = "dpCategoryFilter";
 let activeCategoryFilter = "all";
 let currentUserName = null; // set once in showMain — lets tab clicks re-render without re-threading `name` everywhere
+let currentUserRole = null; // "senior" | "junior" — gates the Settings drawer's Auto-assign/On duty rows
 
 // ── Elements ────────────────────────────────────────────────────────────
 const setupDiv      = document.getElementById("setup");
@@ -63,7 +64,11 @@ function showMain(name, role) {
   assignSection.style.display = "flex";
 
   currentUserName = name;
+  currentUserRole = role;
   whoText.textContent = `Hi, ${name}!`;
+
+  const autoAssignSection = document.getElementById("dpAutoAssignSection");
+  if (autoAssignSection) autoAssignSection.style.display = role === "senior" ? "block" : "none";
 
   renderAssignmentsList(name);
   checkConnection();
@@ -226,6 +231,107 @@ function renderTodayStats() {
   statCompletedEl.textContent = String(currentTodayStats.completed);
   statRejectedEl.textContent  = String(currentTodayStats.rejected);
   statTotalEl.textContent     = String(currentTodayStats.total);
+}
+
+// ── Round-robin auto-assign (Configuration, in the Settings drawer) ─────
+// Mirrors the exact same recommendation algorithm assigner-content.js runs
+// on the CRM page (same EDITORS list, same "today, in eligible-editor
+// order, break ties by whoever was picked last" logic) — but the panel
+// only ever DISPLAYS "Next up" and lets a senior toggle On duty /
+// Auto-assign here; it never assigns anything itself. The actual engine
+// that watches for fresh Unassigned listings and calls assign() still has
+// to live in assigner-content.js, since that requires the CRM page's own
+// DOM. autoAssignConfig and allAssignmentsForAutoAssign are refreshed
+// alongside every regular poll in refreshFromServer.
+const EDITORS = ["Harvy", "Jabir", "Mark", "Sudheep"];
+let autoAssignConfig = {};
+let allAssignmentsForAutoAssign = [];
+
+function getAutoAssignRecommendation() {
+  const counts = {};
+  EDITORS.forEach(e => { counts[e] = 0; });
+  const eligibleEditors = EDITORS.filter(e => autoAssignConfig[e] !== false);
+  const todayStr = new Date().toDateString();
+  let lastPicked = null, lastPickedAt = -Infinity;
+
+  allAssignmentsForAutoAssign.forEach(entry => {
+    if (!entry || !entry.editor || !EDITORS.includes(entry.editor)) return;
+    const effectiveAt = entry.reassignedAt || entry.assignedAt;
+    if (!effectiveAt) return;
+    const d = new Date(effectiveAt);
+    if (isNaN(d.getTime()) || d.toDateString() !== todayStr) return;
+    counts[entry.editor] += 1;
+    const t = d.getTime();
+    if (t >= lastPickedAt) { lastPickedAt = t; lastPicked = entry.editor; }
+  });
+
+  if (!eligibleEditors.length) return { next: null, counts };
+  const minCount = Math.min(...eligibleEditors.map(e => counts[e]));
+  const candidates = eligibleEditors.filter(e => counts[e] === minCount);
+  let next = null;
+  if (lastPicked) {
+    const startIdx = EDITORS.indexOf(lastPicked);
+    for (let i = 1; i <= EDITORS.length; i++) {
+      const cand = EDITORS[(startIdx + i) % EDITORS.length];
+      if (candidates.includes(cand)) { next = cand; break; }
+    }
+  }
+  if (!next) next = candidates[0];
+  return { next, counts };
+}
+
+function renderNextUpLine() {
+  const el = document.getElementById("dpNextUpLine");
+  if (!el) return;
+  const { next, counts } = getAutoAssignRecommendation();
+  el.textContent = next ? `\u2192 Next up: ${next} (${counts[next] || 0} today)` : "\u2192 No one eligible \u2014 check On duty";
+}
+
+// Rebuilds the On duty checkbox list from the current autoAssignConfig.
+// Cheap enough to fully rebuild (only 4 editors) rather than diff.
+function renderOnDutyList() {
+  const wrap = document.getElementById("dpOnDutyList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+
+  EDITORS.forEach(name => {
+    const row = document.createElement("label");
+    row.className = "dp-onduty-row";
+
+    const nameWrap = document.createElement("span");
+    nameWrap.className = "dp-onduty-name-wrap";
+    nameWrap.textContent = name;
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = autoAssignConfig[name] !== false;
+    cb.addEventListener("change", () => {
+      const eligible = cb.checked;
+      // Optimistic, same pattern as everywhere else in this file — flips
+      // immediately, reverts itself if the server comes back with
+      // anything other than success.
+      const previous = autoAssignConfig[name] !== false;
+      autoAssignConfig = { ...autoAssignConfig, [name]: eligible };
+      renderNextUpLine();
+      chrome.runtime.sendMessage({ type: "DP_SET_AUTO_ASSIGN_ELIGIBILITY", editor: name, eligible }, resp => {
+        if (!(resp && resp.ok)) {
+          cb.checked = previous;
+          autoAssignConfig = { ...autoAssignConfig, [name]: previous };
+          renderNextUpLine();
+          showToast(`Could not update ${name}'s On duty status.`);
+        }
+      });
+    });
+
+    row.appendChild(nameWrap);
+    row.appendChild(cb);
+    wrap.appendChild(row);
+  });
+}
+
+function renderAutoAssignSettings() {
+  renderNextUpLine();
+  renderOnDutyList();
 }
 
 // ── Local snapshot cache ─────────────────────────────────────────────────
@@ -394,7 +500,12 @@ function refreshFromServer(name) {
       a.editor === name && ACTIVE_STATUSES.includes(a.status)
     );
     currentTodayStats = computeTodayStats(resp.data.assignments, name);
+    allAssignmentsForAutoAssign = resp.data.assignments;
+    if (resp.data.autoAssignConfig && typeof resp.data.autoAssignConfig === "object") {
+      autoAssignConfig = resp.data.autoAssignConfig;
+    }
     renderList(name);
+    renderAutoAssignSettings();
     saveSnapshot(name);
   });
 }
@@ -1039,5 +1150,76 @@ if (autoAllToggle) {
     // Give background.js's storage.onChanged listener a beat to actually
     // re-arm the alarm with the new interval before we read it back.
     if (autoAllToggle.checked) setTimeout(tickAutoAllCountdown, 300);
+  });
+}
+
+// ── Settings drawer ──────────────────────────────────────────────────────
+// Bottom sheet holding Auto-Refresh CRM + Configuration. Slides up on open
+// rather than living permanently in the page flow — see the CSS comment
+// on .dp-settings-drawer for why.
+const settingsOpenBtn  = document.getElementById("dpSettingsOpenBtn");
+const settingsDrawer   = document.getElementById("dpSettingsDrawer");
+const settingsBackdrop = document.getElementById("dpSettingsBackdrop");
+const settingsCloseBtn = document.getElementById("dpSettingsCloseBtn");
+
+function openSettingsDrawer() {
+  if (!settingsDrawer) return;
+  settingsDrawer.classList.add("is-open");
+  if (settingsBackdrop) settingsBackdrop.classList.add("is-open");
+  // Make sure Next up / On duty reflect the latest data the moment
+  // someone actually looks at them, rather than whatever was last polled.
+  renderAutoAssignSettings();
+}
+
+function closeSettingsDrawer() {
+  if (!settingsDrawer) return;
+  settingsDrawer.classList.remove("is-open");
+  if (settingsBackdrop) settingsBackdrop.classList.remove("is-open");
+}
+
+if (settingsOpenBtn)  settingsOpenBtn.addEventListener("click", openSettingsDrawer);
+if (settingsCloseBtn) settingsCloseBtn.addEventListener("click", closeSettingsDrawer);
+if (settingsBackdrop) settingsBackdrop.addEventListener("click", closeSettingsDrawer);
+
+// ── Configuration: Open in new tab ──────────────────────────────────────
+// Moved here from the CRM page's own filter bar — writes the exact same
+// chrome.storage.local key assigner-content.js already reads, and that
+// file now also listens for this key changing live (see its
+// chrome.storage.onChanged listener), so flipping this while a CRM tab is
+// already open takes effect immediately, no reload needed.
+const openNewTabToggle = document.getElementById("dpOpenNewTabToggle");
+if (openNewTabToggle) {
+  chrome.storage.local.get(["dpOpenListingNewTab"], result => {
+    openNewTabToggle.checked = result.dpOpenListingNewTab === true;
+  });
+  openNewTabToggle.addEventListener("change", () => {
+    chrome.storage.local.set({ dpOpenListingNewTab: openNewTabToggle.checked });
+  });
+}
+
+// ── Configuration: Auto-assign ──────────────────────────────────────────
+// Same live-storage-key relationship as Open in new tab above. One
+// difference: assigner-content.js deliberately forces this back to OFF
+// (and writes that OFF state back here) every time a CRM tab freshly loads
+// — a safety net so the auto-assigner never silently keeps running off a
+// stale "on" from a previous session. That means this toggle can appear to
+// flip itself off if a CRM tab reloads while it was on; that's expected,
+// not a bug — just flip it back on here to resume.
+const autoAssignToggle = document.getElementById("dpAutoAssignToggle");
+if (autoAssignToggle) {
+  chrome.storage.local.get(["dpAutoAssignEnabled"], result => {
+    autoAssignToggle.checked = result.dpAutoAssignEnabled === true;
+  });
+  autoAssignToggle.addEventListener("change", () => {
+    chrome.storage.local.set({ dpAutoAssignEnabled: autoAssignToggle.checked });
+  });
+
+  // Keeps this toggle in sync if assigner-content.js resets it (see above)
+  // while the drawer happens to be open, or from another instance of this
+  // side panel.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.dpAutoAssignEnabled) {
+      autoAssignToggle.checked = changes.dpAutoAssignEnabled.newValue === true;
+    }
   });
 }

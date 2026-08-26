@@ -191,6 +191,14 @@ const CHANGELOG = [
     "Auto-Refresh CRM now shows a live countdown to the next auto-click, right under the interval slider.",
     "Auto-Refresh CRM now only clicks \"All\" on your first open CRM tab, instead of every open CRM tab.",
   ]},
+      { version: 78, notes: [
+    "Added a Settings drawer to the side panel \u2014 tap the new \"Settings\" button to slide it up from the bottom, tap outside it (or the \u2715) to slide it back down. Auto-Refresh CRM now lives inside it instead of sitting permanently in the page.",
+    "Moved Configuration \u2014 Open in new tab, Auto-assign, and On duty (seniors only) \u2014 out of the CRM page's own filter bar and into that same Settings drawer. Flipping any of them updates the CRM tab immediately, no reload needed. Auto-assign still resets to off every time a CRM tab freshly loads, same safety behavior as before, so the drawer's toggle can visibly flip itself off when that happens \u2014 that's expected, not a bug.",
+    "The \"Next up\" round-robin recommendation is now computed and shown right in the side panel too, next to the Auto-assign toggle.",
+  ]},
+      { version: 79, notes: [
+    "Removed the now-unused toggle-switch CSS left behind on the CRM page from last version's move of Configuration into the side panel.",
+  ]},
 ];
 
 const card = document.getElementById("card");

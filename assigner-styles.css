@@ -290,32 +290,11 @@
 }
 .dp-editor-filter-option:hover { background: rgba(0,209,178,0.12); }
 .dp-editor-filter-option input[type="checkbox"] { accent-color: #00d1b2; cursor: pointer; }
-/* Auto Drive-search toggle switch */
-.dp-toggle-wrap {
-  position: relative; display: inline-block;
-  width: 34px; height: 18px; flex-shrink: 0; cursor: pointer;
-}
-.dp-toggle-input {
-  appearance: none; -webkit-appearance: none;
-  position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer;
-}
-.dp-toggle-slider {
-  position: absolute; inset: 0; pointer-events: none;
-  background: #262a38; border: 1px solid #353b4d; border-radius: 18px;
-  transition: background-color .15s, border-color .15s;
-}
-.dp-toggle-slider::before {
-  content: ""; position: absolute; left: 2px; top: 2px;
-  width: 12px; height: 12px; border-radius: 50%;
-  background: #9aa0ad; transition: transform .15s, background-color .15s;
-}
-.dp-toggle-input:hover + .dp-toggle-slider { border-color: #00d1b2; }
-.dp-toggle-input:checked + .dp-toggle-slider {
-  background: rgba(0,209,178,0.22); border-color: #00d1b2;
-}
-.dp-toggle-input:checked + .dp-toggle-slider::before {
-  transform: translateX(16px); background: #00d1b2;
-}
+/* Note: the Configuration panel that used to live here (Open in new tab /
+   Auto-assign toggle switches, "Next up" indicator, On duty popover) has
+   moved to the side panel's Settings drawer — see sidepanel.js/html. The
+   .dp-toggle-wrap/.dp-toggle-input/.dp-toggle-slider rules that only ever
+   styled those two toggle switches were removed along with it. */
 .dp-filter-tools { margin-left: auto; display: flex; align-items: center; gap: 14px; }
 .dp-filter-clear { background: none; border: none; color: #9aa0ad; text-decoration: underline; cursor: pointer; font-size: 0.8rem; white-space: nowrap; }
 .dp-filter-counter { color: #6b7280; font-size: 0.8rem; white-space: nowrap; }

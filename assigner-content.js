@@ -478,6 +478,23 @@
     });
   }
 
+  // "Open in new tab" and "Auto-assign" are now toggled from the side
+  // panel's Settings drawer rather than from a control rendered on this
+  // page (see the removed Configuration filter-bar section above) — this
+  // is what makes flipping either of them take effect in an already-open
+  // CRM tab immediately, instead of only on the next reload.
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes.dpOpenListingNewTab) {
+        openListingInNewTabEnabled = changes.dpOpenListingNewTab.newValue === true;
+      }
+      if (changes.dpAutoAssignEnabled) {
+        autoAssignEnabled = changes.dpAutoAssignEnabled.newValue === true;
+      }
+    });
+  }
+
   // ── Scroll preservation ──────────────────────────────────────────────────
   function preserveScrollAround(actionFn) {
     const x = window.scrollX, y = window.scrollY;
@@ -1838,134 +1855,14 @@
     statusHT.panel.appendChild(statusWrap);
     bar.appendChild(statusHT.section);
 
-    // Configuration — consolidates every toggle-style setting (Open in new
-    // tab, Auto-assign + its "Next up" readout + On duty) behind one
-    // hover-revealed panel, instead of each permanently taking up its own
-    // slot in the bar. Same text-trigger + horizontal-slide pattern as
-    // every other filter now, rather than a floating icon-triggered card.
-    const configHT = makeHoverTrigger("Configuration");
-    const settingsPanel = configHT.panel;
-
-    // Open-listing-in-new-tab toggle — when on, clicking a listing row
-    // opens that listing in a brand-new tab (searched there by ref) and
-    // moves focus to it, instead of opening the drawer in this tab.
-    const autoDriveRow = document.createElement("div");
-    autoDriveRow.className = "dp-settings-row";
-    autoDriveRow.appendChild(Object.assign(document.createElement("span"), {
-      className: "dp-filter-label", textContent: "Open in new tab:"
-    }));
-    const autoDriveLabel = document.createElement("label");
-    autoDriveLabel.className = "dp-toggle-wrap";
-    autoDriveLabel.title = "When on, clicking a listing opens it in a new tab and switches focus there, instead of opening it in this tab";
-    const autoDriveInput = document.createElement("input");
-    autoDriveInput.type = "checkbox";
-    autoDriveInput.className = "dp-toggle-input";
-    autoDriveInput.checked = openListingInNewTabEnabled;
-    autoDriveInput.addEventListener("change", () => {
-      openListingInNewTabEnabled = autoDriveInput.checked;
-      try { chrome.storage.local.set({ dpOpenListingNewTab: openListingInNewTabEnabled }); } catch (e) {}
-    });
-    const autoDriveSlider = document.createElement("span");
-    autoDriveSlider.className = "dp-toggle-slider";
-    autoDriveLabel.appendChild(autoDriveInput);
-    autoDriveLabel.appendChild(autoDriveSlider);
-    autoDriveRow.appendChild(autoDriveLabel);
-    settingsPanel.appendChild(autoDriveRow);
-
-    // Round-robin auto-assign toggle + "who's next" recommendation.
-    // Senior-only, same as the Assign button itself — juniors have no
-    // assign() access, so there's nothing for this to trigger for them.
-    // The "Next up" readout is shown whenever this row renders, whether or
-    // not the toggle itself is on — the recommendation is useful on its
-    // own for manually picking who's next, independent of whether it's
-    // being applied automatically.
-    if (ROLE === "senior") {
-      const autoAssignRow = document.createElement("div");
-      autoAssignRow.className = "dp-settings-row";
-      autoAssignRow.appendChild(Object.assign(document.createElement("span"), {
-        className: "dp-filter-label", textContent: "Auto-assign:"
-      }));
-      const autoAssignLabel = document.createElement("label");
-      autoAssignLabel.className = "dp-toggle-wrap";
-      autoAssignLabel.title = "When on, new Unassigned listings are assigned automatically in round-robin order so today's requests end up spread evenly across the team";
-      const autoAssignInput = document.createElement("input");
-      autoAssignInput.type = "checkbox";
-      autoAssignInput.className = "dp-toggle-input";
-      autoAssignInput.checked = autoAssignEnabled;
-      autoAssignInput.addEventListener("change", () => {
-        autoAssignEnabled = autoAssignInput.checked;
-        // Not persisted to storage — see the init block for why auto-assign
-        // deliberately never restores across a fresh page load/refresh.
-        updateAutoAssignIndicator();
-      });
-      const autoAssignSlider = document.createElement("span");
-      autoAssignSlider.className = "dp-toggle-slider";
-      autoAssignLabel.appendChild(autoAssignInput);
-      autoAssignLabel.appendChild(autoAssignSlider);
-      autoAssignRow.appendChild(autoAssignLabel);
-
-      const autoAssignIndicator = document.createElement("span");
-      autoAssignIndicator.className = "dp-auto-assign-indicator";
-      autoAssignRow.appendChild(autoAssignIndicator);
-      settingsPanel.appendChild(autoAssignRow);
-
-      // "On duty" popover — lets a senior mark specific editors eligible/
-      // ineligible for the round-robin (e.g. only 2 of the 4 are in today).
-      // Reuses the exact same wrap/btn/popover/option classes as the
-      // Editor filter dropdown above, just with a different data source
-      // and a different effect (config, not filtering).
-      const onDutyRow = document.createElement("div");
-      onDutyRow.className = "dp-settings-row";
-      const onDutyWrap = document.createElement("div");
-      onDutyWrap.className = "dp-editor-filter-wrap";
-      const onDutyBtn = Object.assign(document.createElement("button"), {
-        type: "button", className: "dp-editor-filter-btn", textContent: "On duty \u25BE"
-      });
-      onDutyBtn.title = "Choose which editors the auto-assigner is allowed to hand new listings to today";
-      const onDutyPop = document.createElement("div");
-      onDutyPop.className = "dp-editor-filter-popover dp-popover";
-      EDITORS.forEach(name => {
-        const optLabel = document.createElement("label");
-        optLabel.className = "dp-editor-filter-option dp-eligibility-option";
-        optLabel.dataset.dpEditor = name;
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = autoAssignConfig[name] !== false;
-        cb.addEventListener("change", () => {
-          const eligible = cb.checked;
-          // Optimistic — flip locally right away so the popover and the
-          // "Next up" readout feel instant, same pattern as every other
-          // write in this file. Reverts itself if the server comes back
-          // with anything other than success.
-          const previous = autoAssignConfig[name] !== false;
-          autoAssignConfig = { ...autoAssignConfig, [name]: eligible };
-          updateAutoAssignIndicator();
-          safeSendMessage({ type: "DP_SET_AUTO_ASSIGN_ELIGIBILITY", editor: name, eligible }, resp => {
-            if (!(resp && resp.ok)) {
-              console.log("DP on-duty toggle failed, reverting", resp);
-              cb.checked = previous;
-              autoAssignConfig = { ...autoAssignConfig, [name]: previous };
-              updateAutoAssignIndicator();
-            }
-          });
-        });
-        const sp = document.createElement("span"); sp.textContent = name;
-        optLabel.appendChild(cb); optLabel.appendChild(sp);
-        onDutyPop.appendChild(optLabel);
-      });
-      onDutyBtn.addEventListener("click", e => {
-        e.stopPropagation();
-        const wasOpen = onDutyPop.classList.contains("is-open");
-        closeAllPopovers();
-        if (!wasOpen) onDutyPop.classList.add("is-open");
-      });
-      onDutyPop.addEventListener("click", e => e.stopPropagation());
-      onDutyWrap.appendChild(onDutyBtn); onDutyWrap.appendChild(onDutyPop);
-      onDutyRow.appendChild(onDutyWrap);
-      settingsPanel.appendChild(onDutyRow);
-    }
-
-    bar.appendChild(configHT.section);
+    // Configuration (Open in new tab / Auto-assign / On duty) used to live
+    // here as its own hover-revealed panel. It's now controlled entirely
+    // from the side panel's Settings drawer instead — this file still runs
+    // the actual engine behind each of those (openListingInNewTabEnabled's
+    // click-handling below, and the whole "── Round-robin auto-assign ──"
+    // section up top), it just no longer renders or owns the toggles
+    // themselves. See the chrome.storage.onChanged listener further down
+    // for how a change made in the side panel reaches this tab live.
 
     // Clear + counter + dashboard
     const toolsSection = document.createElement("div");
@@ -3667,12 +3564,21 @@
   chrome.storage.local.get(["role", "myName", "dpAssignSnapshot", "dpOpenListingNewTab"], result => {
     ROLE = (result && result.role) || "senior";
     MY_NAME = (result && result.myName) || "";
-    // Default OFF — only on if explicitly turned on before.
+    // Default OFF — only on if explicitly turned on before. Now set from
+    // the side panel's Settings drawer; kept live afterward by the
+    // chrome.storage.onChanged listener further below.
     openListingInNewTabEnabled = !!(result && result.dpOpenListingNewTab === true);
     // Auto-assign is intentionally NEVER restored from a prior session —
     // every fresh page load/refresh starts with it OFF, full stop, even if
-    // it was left on before. It has to be turned back on by hand each time.
+    // it was left on before (from this tab or the side panel). It has to
+    // be turned back on by hand each time. We also write that OFF state
+    // back to storage so the side panel's toggle reflects the same reset,
+    // rather than showing "on" for a feature that's actually just gone
+    // quiet in every tab.
     autoAssignEnabled = false;
+    try {
+      chrome.storage.local.set({ dpAutoAssignEnabled: false });
+    } catch (e) {}
 
     // Hydrate from the last-known snapshot (saved after every successful
     // refresh — see refreshAssignments) BEFORE the first render pass runs.
