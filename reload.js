@@ -220,6 +220,13 @@ const CHANGELOG = [
       { version: 84, notes: [
     "The side panel's Start/Hold/Downloaded buttons now give a write the same ~45 seconds of patience as the CRM tab already does before actually reverting anything on a failed response, instead of snapping back to the old value on the very first flaky reply. Apps Script's write can genuinely still succeed even when the response back to the browser fails, so this checks a few more times over that window before concluding it truly didn't go through.",
   ]},
+      { version: 85, notes: [
+    "The \u201cNext up\u201d auto-assign indicator (CRM filter bar and side panel Settings drawer) now updates the instant an assignment happens on the tab that made it, instead of waiting on the next regular refresh pass. It was already pushed live to every other open tab/panel within about a second (see v83); this closes the last bit of lag on the originating tab itself.",
+  ]},
+      { version: 86, notes: [
+    "CRM \u2194 side panel sync is now genuinely instant in both directions, not just \u201cwithin about a second.\u201d Every action (Start, Hold, Downloaded, assign, complete, reject, restart, etc.) is now pushed directly from wherever it happened to every other open CRM tab and the side panel the moment it's clicked \u2014 before the Sheet write even finishes, not after. Google Sheets stays the source of truth for persistence, but it's no longer the trigger for the visual update.",
+    "Fixed a real flicker bug: a background poll landing at just the wrong moment (after a click, but before that click's own write had actually finished saving) could revert a correct optimistic status change back to the old value for a few seconds before self-correcting. Both surfaces now protect a fresh local change for a full 50 seconds \u2014 long enough to comfortably outlast a slow write \u2014 so a still-in-flight action can no longer be overwritten by stale data. This was already partly true on the CRM tab; the side panel had no such protection at all until now.",
+  ]},
 ];
 
 const card = document.getElementById("card");

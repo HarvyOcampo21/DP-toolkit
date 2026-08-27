@@ -126,16 +126,21 @@ document.addEventListener("visibilitychange", () => {
 
 // Pushed from the background worker the moment ANY write actually lands in
 // the Sheet — from this panel, a CRM tab, or another editor entirely (see
-// broadcastDataChanged in background.js). This is what makes an action
-// taken on the CRM tab (assign/complete/reject/hold) show up here almost
-// immediately instead of waiting up to 3s for the next poll tick, and the
-// same in reverse for actions taken from this panel (Start/Hold/Downloaded).
+// broadcastDataChanged in background.js). This is the slower, eventual-
+// consistency half of cross-surface sync: it triggers a full DP_GET_ALL
+// round trip, so it can take a moment. The instant half — DP_LIVE_PATCH,
+// see applyLivePatch further down — is what actually makes an action on
+// the CRM tab show up here right away; this is just the backstop that
+// reconciles everything against the Sheet a little afterward regardless.
 if (chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((message) => {
-    if (message && message.type === "DP_FORCE_REFRESH") {
+    if (!message) return;
+    if (message.type === "DP_FORCE_REFRESH") {
       chrome.storage.local.get(["myName"], ({ myName }) => {
         if (myName) refreshFromServer(myName);
       });
+    } else if (message.type === "DP_LIVE_PATCH") {
+      applyLivePatch(message.ref, message.patch, message.downloaded, message.ts);
     }
   });
 }
@@ -227,6 +232,25 @@ const ACTIVE_STATUSES = ["Assigned", "In Progress", "On Hold"];
 // SAME object the card was built from and re-render just that one card —
 // instant feedback, no round trip to the server needed to see the change.
 let currentAssignments = [];
+
+// Every assignment this panel currently knows about, keyed by Ref — not
+// just "my active ones" (that's currentAssignments, derived FROM this).
+// This is the canonical merge target for both a fresh DP_GET_ALL response
+// (see refreshFromServer) and an instantly-pushed DP_LIVE_PATCH from the
+// CRM tab (see applyLivePatch) — mirrors assignmentCache in
+// assigner-content.js, same shape, same purpose.
+let assignmentByRef = {};
+
+// Per-Ref timestamp of the last LOCAL change (an action taken right here
+// in this panel, or a live patch just applied from elsewhere) — mirrors
+// lastLocalChangeAt in assigner-content.js exactly, same cooldown value
+// and all. See the merge logic in refreshFromServer for why this exists:
+// without it, a scheduled poll that happens to read the Sheet before a
+// very recent write has actually landed would silently clobber a correct
+// optimistic (or just-pushed) UI state back to stale data — the exact
+// flicker this whole mechanism is built to prevent.
+let lastLocalChangeAt = {};
+const LOCAL_CHANGE_COOLDOWN_MS = 50000; // matches assigner-content.js — comfortably longer than DP_VERIFY_MAX_ATTEMPTS × DP_VERIFY_RETRY_DELAY_MS (the ~45s verify-before-revert window, defined further down), so a poll can never win that race
 
 // ── Today's activity stats (Completed / Rejected / Total) ────────────────
 // Read straight from each of the CURRENT USER's assignments' own history
@@ -523,9 +547,12 @@ function refreshFromServer(name) {
       // the error state. Otherwise leave the cached cards up rather than
       // wiping a perfectly good (if slightly stale) view over one failed
       // refresh. Only toast on the transition INTO failing, not on every
-      // single failed poll — this runs every 5s (see startLivePolling), so
-      // toasting on every failure while Apps Script stays down would just
-      // spam the same message on screen forever instead of showing it once.
+      // single failed poll — this runs on the poll loop (see
+      // startLivePolling, 3s visible / 15s hidden) plus an extra immediate
+      // call any time a write lands anywhere (see the DP_FORCE_REFRESH
+      // listener below), so toasting on every failure while Apps Script
+      // stays down would just spam the same message on screen forever
+      // instead of showing it once.
       if (currentAssignments.length === 0) {
         listContainer.innerHTML = '<div class="empty-state">Could not load listings.</div>';
       } else if (lastRefreshOk) {
@@ -536,11 +563,33 @@ function refreshFromServer(name) {
     }
 
     lastRefreshOk = true;
-    currentAssignments = resp.data.assignments.filter(a =>
-      a.editor === name && ACTIVE_STATUSES.includes(a.status)
-    );
-    currentTodayStats = computeTodayStats(resp.data.assignments, name);
-    allAssignmentsForAutoAssign = resp.data.assignments;
+
+    // "Last row wins" per Ref — same reasoning used everywhere else in
+    // this extension that reads DP_GET_ALL: a Ref can have more than one
+    // row across restart/reshoot cycles, and the Sheet always appends the
+    // newest cycle after the ones it follows, so simply overwriting as we
+    // walk the array in order naturally keeps only the current cycle.
+    const freshByRef = {};
+    resp.data.assignments.forEach(a => { if (a && a.ref) freshByRef[a.ref] = a; });
+
+    // Cooldown-protected merge — see LOCAL_CHANGE_COOLDOWN_MS's own
+    // comment for the full rationale. Only adopt the fresh value for a
+    // Ref once it's past its cooldown; otherwise keep whatever's already
+    // in assignmentByRef, whether that came from an action taken right
+    // here or a live patch just pushed in from the CRM tab.
+    const allRefs = new Set([...Object.keys(assignmentByRef), ...Object.keys(freshByRef)]);
+    const merged = {};
+    allRefs.forEach(ref => {
+      const withinCooldown = (Date.now() - (lastLocalChangeAt[ref] || 0)) < LOCAL_CHANGE_COOLDOWN_MS;
+      const value = withinCooldown ? assignmentByRef[ref] : freshByRef[ref];
+      if (value) merged[ref] = value;
+    });
+    assignmentByRef = merged;
+
+    const allKnown = Object.values(assignmentByRef);
+    currentAssignments = allKnown.filter(a => a.editor === name && ACTIVE_STATUSES.includes(a.status));
+    currentTodayStats = computeTodayStats(allKnown, name);
+    allAssignmentsForAutoAssign = allKnown;
     if (resp.data.autoAssignConfig && typeof resp.data.autoAssignConfig === "object") {
       autoAssignConfig = resp.data.autoAssignConfig;
     }
@@ -751,10 +800,13 @@ function buildAssignCard(a, name) {
     const val = downloadedCheckbox.checked;
     const downloadedAt = val ? new Date().toISOString() : "";
     a.downloaded = val;
+    a.downloadedAt = downloadedAt;
+    markLocalChange(a.ref);
     saveSnapshot(name);
     const revert = () => {
       a.downloaded = !val;
       downloadedCheckbox.checked = !val;
+      markLocalChange(a.ref);
       saveSnapshot(name);
     };
     chrome.runtime.sendMessage(
@@ -852,6 +904,7 @@ function verifyBeforeReverting(ref, matches, revert, failureMessage, attempt = 0
 function applyOptimisticUpdate(a, name, patch, type, payload, failureMessage) {
   const previous = { ...a };
   Object.assign(a, patch);
+  markLocalChange(a.ref);
   refreshCard(a, name);
 
   // Only checks the fields actually in `patch` — a broader equality check
@@ -859,11 +912,95 @@ function applyOptimisticUpdate(a, name, patch, type, payload, failureMessage) {
   // (e.g. crmStatus drifting from an unrelated CRM-side change landing
   // server-side in between our optimistic update and this check).
   const matches = row => Object.keys(patch).every(k => (row[k] || "") === (patch[k] || ""));
-  const revert = () => { Object.assign(a, previous); refreshCard(a, name); };
+  const revert = () => { Object.assign(a, previous); markLocalChange(a.ref); refreshCard(a, name); };
 
   chrome.runtime.sendMessage({ type, ...payload }, resp => {
     if (resp && resp.ok) return;
     verifyBeforeReverting(a.ref, matches, revert, failureMessage);
+  });
+}
+
+// ── Instant cross-surface sync ───────────────────────────────────────────
+// The direct-communication half of CRM ↔ side panel sync, independent of
+// (and always ahead of) any Google Sheets round trip — see the matching
+// broadcastLivePatch/applyLivePatch pair in assigner-content.js for the
+// CRM tab's side of this, and DP_LIVE_PATCH in background.js for the
+// relay in between. markLocalChange is the single place both a genuine
+// local action (Start/Hold/Downloaded above) and a received live patch
+// (applyLivePatch below) record "this Ref just changed here" — bumping
+// lastLocalChangeAt (so refreshFromServer's cooldown-protected merge
+// can't immediately clobber it with a still-stale poll response) and
+// pushing the news out to every other open surface in the same breath.
+function markLocalChange(ref) {
+  lastLocalChangeAt[ref] = Date.now();
+  broadcastLivePatch(ref);
+}
+
+function broadcastLivePatch(ref) {
+  if (!ref) return;
+  try {
+    chrome.runtime.sendMessage({
+      type: "DP_LIVE_PATCH", ref,
+      patch: assignmentByRef[ref] || null,
+      downloaded: !!(assignmentByRef[ref] && assignmentByRef[ref].downloaded),
+      ts: Date.now(),
+    });
+  } catch (e) { /* non-fatal — extension context may be mid-reload */ }
+}
+
+// Receiving side — see markLocalChange's comment above for the full
+// picture. Deliberately NOT gated on any DP_GET_ALL round trip: this is
+// what makes an action taken on the CRM tab show up here the instant it
+// happens, not a second or more later once that write's own Sheet
+// round-trip resolves and the slower DP_FORCE_REFRESH/poll path catches
+// up.
+function applyLivePatch(ref, patch, downloaded, ts) {
+  if (!ref) return;
+  // Same staleness guard as everywhere else: a patch that isn't newer
+  // than whatever we already locally know about this Ref loses — protects
+  // against genuinely out-of-order delivery, and makes an action echoing
+  // straight back to the surface that made it a harmless no-op.
+  if (lastLocalChangeAt[ref] && ts && lastLocalChangeAt[ref] > ts) return;
+  lastLocalChangeAt[ref] = ts || Date.now();
+
+  if (patch) assignmentByRef[ref] = typeof downloaded === "boolean" ? { ...patch, downloaded } : patch;
+  else delete assignmentByRef[ref];
+
+  chrome.storage.local.get(["myName"], ({ myName }) => {
+    if (!myName) return;
+    const idx = currentAssignments.findIndex(x => x.ref === ref);
+    const wasTracked = idx !== -1;
+    const a = assignmentByRef[ref];
+    const nowActiveForMe = !!(a && a.editor === myName && ACTIVE_STATUSES.includes(a.status));
+
+    if (wasTracked && nowActiveForMe) {
+      // Same object identity swap refreshCard expects for its normal
+      // single-card surgical update.
+      currentAssignments[idx] = a;
+      refreshCard(a, myName);
+    } else if (wasTracked && !nowActiveForMe) {
+      // No longer active, or reassigned away from this editor —
+      // refreshCard's own !stillActive branch drops the card, but it
+      // matches by object identity (x !== a) against the OLD tracked
+      // object, so mutate that one in place rather than handing it a
+      // completely different reference it wouldn't recognize.
+      const stale = currentAssignments[idx];
+      Object.assign(stale, a || { status: "" });
+      refreshCard(stale, myName);
+    } else if (!wasTracked && nowActiveForMe) {
+      // Brand new to this panel — e.g. a fresh auto-assign just landed on
+      // this editor over on the CRM tab. refreshCard only knows how to
+      // update an already-tracked entry, so this one case falls back to
+      // a full list rebuild rather than hand-rolling "insert in the right
+      // sorted position" logic renderList already owns.
+      currentAssignments.push(a);
+      renderList(myName);
+    }
+    // else: not tracked and still not relevant to this editor — nothing
+    // to show, nothing to do.
+
+    renderAutoAssignSettings(); // Next up counts may have just changed too
+    saveSnapshot(myName);
   });
 }
 

@@ -277,6 +277,33 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     })();
     return true;
   }
+
+  // ── Live patch relay (instant CRM ↔ side panel sync) ────────────────────
+  // The instant half of cross-surface sync — see broadcastLivePatch's own
+  // comment in assigner-content.js/sidepanel.js. Fired the moment EITHER
+  // surface makes a local optimistic update, well before that write's own
+  // Sheet round trip even resolves, and relayed here immediately to every
+  // other open CRM tab + the side panel with zero gating on anything —
+  // deliberately NOT routed through postToAssignerSheet/broadcastDataChanged
+  // (that pathway stays as the slower eventual-consistency backstop, gated
+  // on write success, see its own comment above). Echoing back to the
+  // tab/panel that sent it is harmless by design: every receiver ignores a
+  // patch whose timestamp isn't newer than its own last local change for
+  // that Ref (see applyLivePatch on both sides), so no "don't relay to the
+  // origin" bookkeeping is needed here at all.
+  if (message.type === "DP_LIVE_PATCH") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
+        await Promise.all(tabs.map(tab => chrome.tabs.sendMessage(tab.id, message).catch(() => {})));
+      } catch (e) { /* non-fatal */ }
+      try { chrome.runtime.sendMessage(message, () => void chrome.runtime.lastError); } catch (e) { /* non-fatal */ }
+    })();
+    // Fire-and-forget — no response expected from anyone, and returning
+    // true here (keeping the channel open) with nothing ever calling
+    // sendResponse would just leak a pending callback.
+    return false;
+  }
 });
 
 // Same DP_AUTO_SEARCH flow as above, but reachable from outside the

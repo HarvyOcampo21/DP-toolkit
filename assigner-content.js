@@ -231,6 +231,70 @@
   let downloadedCache = {};
   let lastLocalChangeAt = {};
   let refreshInFlight = false;
+
+  // ── Instant cross-surface sync ───────────────────────────────────────────
+  // The direct-communication half of CRM ↔ side panel sync, independent of
+  // (and always ahead of) any Google Sheets round trip — see the matching
+  // broadcastLivePatch/applyLivePatch pair in sidepanel.js for the panel's
+  // side of this, and DP_LIVE_PATCH in background.js for the relay in
+  // between. markLocalChange is the single place a genuinely local
+  // mutation records "this Ref just changed here" — every one of the ~20
+  // spots elsewhere in this file that used to just set
+  // lastLocalChangeAt[ref] = Date.now() now calls this instead, so the
+  // change is both protected from an immediately-following stale poll
+  // (see LOCAL_CHANGE_COOLDOWN_MS above) AND pushed out to every other
+  // open surface in the same breath, with zero dependency on the actual
+  // Sheet write's own round trip.
+  function markLocalChange(ref) {
+    lastLocalChangeAt[ref] = Date.now();
+    broadcastLivePatch(ref);
+  }
+
+  function broadcastLivePatch(ref) {
+    if (!ref) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: "DP_LIVE_PATCH", ref,
+        patch: assignmentCache[ref] || null,
+        downloaded: !!downloadedCache[ref],
+        ts: Date.now(),
+      });
+    } catch (e) { /* non-fatal — extension context may be mid-reload */ }
+  }
+
+  // Receiving side — see markLocalChange's comment above for the full
+  // picture. Deliberately NOT gated on any DP_GET_ALL round trip: this is
+  // what makes an action taken on the side panel (or another CRM tab) show
+  // up on THIS tab's row the instant it happens, rather than waiting on
+  // that write's own Sheet round-trip plus the slower DP_FORCE_REFRESH/
+  // poll path to catch up.
+  function applyLivePatch(ref, patch, downloaded, ts) {
+    if (!ref) return;
+    // Same staleness guard used everywhere else here: a patch that isn't
+    // newer than whatever this tab already locally knows about this Ref
+    // loses — protects against genuinely out-of-order delivery, and makes
+    // an action echoing straight back to the tab that made it a harmless
+    // no-op.
+    if (lastLocalChangeAt[ref] && ts && lastLocalChangeAt[ref] > ts) return;
+    lastLocalChangeAt[ref] = ts || Date.now();
+
+    if (patch) assignmentCache[ref] = patch;
+    else delete assignmentCache[ref];
+    if (downloaded) downloadedCache[ref] = true; else delete downloadedCache[ref];
+
+    document.querySelectorAll(".dp-assign-cell").forEach(cell => {
+      if (cell.dataset.dpRef !== ref) return;
+      cell.__dpRenderStatus && cell.__dpRenderStatus();
+      cell.__dpReassertVisuals && cell.__dpReassertVisuals();
+      const newDownloaded = downloaded ? "1" : "0";
+      if (cell.dataset.dpDownloaded !== newDownloaded) {
+        cell.dataset.dpDownloaded = newDownloaded;
+        cell.__dpSetDownloadedChecked && cell.__dpSetDownloadedChecked(!!downloaded);
+      }
+    });
+    applyFilters(); // also refreshes the "Next up" indicator (see its own hook there)
+  }
+
   let selectedBedroomFilters = new Set();
   let selectedEditorFilters = new Set();
   let selectedStatusFilters = new Set();
@@ -365,7 +429,7 @@
           listingRef: match.listingRef || "",
         };
         if (match.downloaded) downloadedCache[ref] = true; else delete downloadedCache[ref];
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         processRows();
         return;
       }
@@ -515,6 +579,12 @@
           sendResponse({ ok: false, error: String(err && err.message || err) });
         }
         return true;
+      }
+      // The instant half of cross-surface sync — see applyLivePatch's own
+      // comment for the full picture. No response needed; fire-and-forget.
+      if (message && message.type === "DP_LIVE_PATCH") {
+        applyLivePatch(message.ref, message.patch, message.downloaded, message.ts);
+        return;
       }
     });
   }
@@ -797,7 +867,7 @@
         const val = downloadedCheckbox.checked;
         const wasSet = !!downloadedCache[ref];
         if (val) downloadedCache[ref] = true; else delete downloadedCache[ref];
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         cell.dataset.dpDownloaded = val ? "1" : "0";
         // Only stamp a time when turning it ON — unchecking clears the flag
         // but shouldn't erase when it was originally downloaded, so we send
@@ -807,7 +877,7 @@
           if (!(resp && resp.ok)) {
             verifyBeforeReverting(ref, m => !!m.downloaded === val, () => {
               if (wasSet) downloadedCache[ref] = true; else delete downloadedCache[ref];
-              lastLocalChangeAt[ref] = Date.now();
+              markLocalChange(ref);
               cell.dataset.dpDownloaded = wasSet ? "1" : "0";
               downloadedCheckbox.checked = wasSet;
             }, "Could not save downloaded status — reverted.");
@@ -1178,7 +1248,7 @@
           crmStatus: categoryOverride || (previousEntry && previousEntry.crmStatus) || "",
           assignedAt: carriedAssignedAt,
           reassignedAt: isReAssign ? now : "" };
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         cell.dataset.dpAppliedEditor = editor;
         cell.dataset.dpAppliedStatus = "Assigned";
         renderAssigned(editor, "Assigned");
@@ -1198,7 +1268,7 @@
             const actualEditor = resp.data.editor || "";
             const actualStatus = resp.data.status || "";
             assignmentCache[ref] = { ...(assignmentCache[ref] || {}), editor: actualEditor, status: actualStatus };
-            lastLocalChangeAt[ref] = Date.now();
+            markLocalChange(ref);
             cell.dataset.dpAppliedEditor = actualEditor;
             cell.dataset.dpAppliedStatus = actualStatus;
             if (isActiveStatus(actualStatus)) renderAssigned(actualEditor, actualStatus);
@@ -1221,7 +1291,7 @@
                 cell.dataset.dpAppliedStatus = "";
                 renderUnassigned();
               }
-              lastLocalChangeAt[ref] = Date.now();
+              markLocalChange(ref);
               applyFilters();
             }, "Could not save the assignment — reverted.\nCheck WEB_APP_URL/TOKEN in background.js.");
           }
@@ -1247,7 +1317,7 @@
         // the local cache too, just marked Unassigned — matches what the
         // next full sync will read back.
         assignmentCache[ref] = { ...(previousEntry || {}), editor: "", status: "Unassigned" };
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         cell.dataset.dpAppliedEditor = "";
         cell.dataset.dpAppliedStatus = "Unassigned";
         renderUnassigned();
@@ -1265,7 +1335,7 @@
                 else renderUnassigned();
                 applyFilters();
               }
-              lastLocalChangeAt[ref] = Date.now();
+              markLocalChange(ref);
             }, "Could not clear the assignment — reverted.\nCheck WEB_APP_URL/TOKEN in background.js.");
           }
         });
@@ -1288,7 +1358,7 @@
         } else {
           assignmentCache[ref] = { editor: editorToKeep, status: "In Progress", title };
         }
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         cell.dataset.dpAppliedStatus = "In Progress";
         renderAssigned(editorToKeep, "In Progress");
         applyFilters();
@@ -1299,7 +1369,7 @@
             verifyBeforeReverting(ref, "In Progress", () => {
               if (previousEntry) assignmentCache[ref] = previousEntry;
               else delete assignmentCache[ref];
-              lastLocalChangeAt[ref] = Date.now();
+              markLocalChange(ref);
               cell.dataset.dpAppliedStatus = previousEntry ? previousEntry.status : "";
               if (previousEntry && isActiveStatus(previousEntry.status)) {
                 renderAssigned(previousEntry.editor, previousEntry.status);
@@ -1340,7 +1410,7 @@
           onHoldAt: "", onHoldReason: "", downloadedAt: "",
         };
         delete downloadedCache[ref];
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         cell.dataset.dpAppliedEditor = editorToRestartTo;
         cell.dataset.dpAppliedStatus = "Assigned";
         renderAssigned(editorToRestartTo, "Assigned");
@@ -1362,7 +1432,7 @@
                 cell.dataset.dpAppliedStatus = "";
                 renderUnassigned();
               }
-              lastLocalChangeAt[ref] = Date.now();
+              markLocalChange(ref);
               applyFilters();
             }, "Could not restart this listing — reverted.");
           }
@@ -1397,7 +1467,7 @@
         };
         delete downloadedCache[ref];
         delete cell.dataset.dpCameBack;
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         cell.dataset.dpAppliedEditor = editorToRestartTo;
         cell.dataset.dpAppliedStatus = "Assigned";
         renderAssigned(editorToRestartTo, "Assigned");
@@ -1419,7 +1489,7 @@
                 cell.dataset.dpAppliedStatus = "";
                 renderUnassigned();
               }
-              lastLocalChangeAt[ref] = Date.now();
+              markLocalChange(ref);
               applyFilters();
             }, "Could not restart this listing — reverted.");
           }
@@ -1435,7 +1505,7 @@
         const previousEntry = assignmentCache[ref] || null;
         const editor = (previousEntry && previousEntry.editor) || "";
         assignmentCache[ref] = { ...(previousEntry || {}), editor, status: "On Hold", title, onHoldReason: reason };
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         cell.dataset.dpAppliedStatus = "On Hold";
         renderAssigned(editor, "On Hold");
         applyFilters();
@@ -1446,7 +1516,7 @@
             verifyBeforeReverting(ref, "On Hold", () => {
               if (previousEntry) assignmentCache[ref] = previousEntry;
               else delete assignmentCache[ref];
-              lastLocalChangeAt[ref] = Date.now();
+              markLocalChange(ref);
               cell.dataset.dpAppliedStatus = previousEntry ? previousEntry.status : "";
               if (previousEntry && isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
               else renderUnassigned();
@@ -1619,7 +1689,7 @@
         // reset — whatever was downloaded belongs to the old shoot.
         assignmentCache[ref] = { ...entry, editor: "", status: "Unassigned", crmStatus: liveCrmStatus, downloadedAt: "" };
         delete downloadedCache[ref];
-        lastLocalChangeAt[ref] = Date.now();
+        markLocalChange(ref);
         processRows();
       }
     );
@@ -1779,6 +1849,14 @@
     });
     const counter = document.querySelector(".dp-filter-counter");
     if (counter) counter.textContent = `Showing ${shown} of ${rows.length}`;
+    // Every local optimistic mutation in this file (assign, unassign,
+    // restart, revert, etc.) already calls applyFilters() right after
+    // updating assignmentCache, so hooking the indicator refresh in here
+    // — rather than adding a separate call at each of those ~19 sites —
+    // means "Next up" reflects today's new counts the instant an
+    // assignment happens, not just on the next processRows() pass a
+    // moment later. Cheap: pure assignmentCache reads, no network.
+    updateAutoAssignIndicator();
   }
 
   // ── Filter bar ────────────────────────────────────────────────────────────
@@ -2124,9 +2202,13 @@
         // in-that-instant "old" data and clobbering the correct local
         // state — which then self-corrects on the next poll once the
         // write has landed. That's exactly the "reverts, then fixes
-        // itself a bit later" symptom. 12s comfortably covers a normal
-        // write plus reasonable lock-wait time under load.
-        const LOCAL_CHANGE_COOLDOWN_MS = 12000;
+        // itself a bit later" symptom. 50s comfortably covers
+        // VERIFY_MAX_ATTEMPTS × VERIFY_RETRY_DELAY_MS (the ~45s a write is
+        // given to confirm before actually reverting — see
+        // verifyBeforeReverting below) plus round-trip slack, so a poll
+        // can never win that race and revert something still legitimately
+        // in flight.
+        const LOCAL_CHANGE_COOLDOWN_MS = 50000;
         allRefs.forEach(ref => {
           const localAt = lastLocalChangeAt[ref] || 0;
           if (Date.now() - localAt < LOCAL_CHANGE_COOLDOWN_MS) {
@@ -3398,7 +3480,7 @@
     const title  = previousEntry ? previousEntry.title  || "" : "";
     assignmentCache[ref] = { ...(previousEntry || {}), editor, status: "Completed", title,
       completedAt: new Date().toISOString() };
-    lastLocalChangeAt[ref] = Date.now();
+    markLocalChange(ref);
     document.querySelectorAll(".dp-assign-cell").forEach(c => {
       if (c.dataset.dpRef === ref) {
         c.dataset.dpAppliedStatus = "Completed";
@@ -3415,7 +3497,7 @@
         verifyBeforeReverting(ref, "Completed", () => {
           if (previousEntry) assignmentCache[ref] = previousEntry;
           else delete assignmentCache[ref];
-          lastLocalChangeAt[ref] = Date.now();
+          markLocalChange(ref);
           document.querySelectorAll(".dp-assign-cell").forEach(c => {
             if (c.dataset.dpRef === ref) {
               c.dataset.dpAppliedStatus = previousEntry ? previousEntry.status || "" : "";
@@ -3573,7 +3655,7 @@
     assignmentCache[ref] = { editor, status: "Completed", title, completedAt: new Date().toISOString(),
       bedrooms: (previousEntry && previousEntry.bedrooms) || "",
       crmStatus: (previousEntry && previousEntry.crmStatus) || "" };
-    lastLocalChangeAt[ref] = Date.now();
+    markLocalChange(ref);
     document.querySelectorAll(".dp-assign-cell").forEach(c => {
       if (c.dataset.dpRef === ref) {
         c.dataset.dpAppliedStatus = "Completed";
@@ -3586,7 +3668,7 @@
         verifyBeforeReverting(ref, "Completed", () => {
           if (previousEntry) assignmentCache[ref] = previousEntry;
           else delete assignmentCache[ref];
-          lastLocalChangeAt[ref] = Date.now();
+          markLocalChange(ref);
           document.querySelectorAll(".dp-assign-cell").forEach(c => {
             if (c.dataset.dpRef === ref) {
               c.dataset.dpAppliedStatus = previousEntry ? previousEntry.status || "" : "";
@@ -3628,7 +3710,7 @@
     const title  = previousEntry ? previousEntry.title  || "" : "";
 
     assignmentCache[ref] = { ...(previousEntry || {}), editor, status: "Rejected", title };
-    lastLocalChangeAt[ref] = Date.now();
+    markLocalChange(ref);
     document.querySelectorAll(".dp-assign-cell").forEach(c => {
       if (c.dataset.dpRef === ref) {
         c.dataset.dpAppliedStatus = "Rejected";
@@ -3641,7 +3723,7 @@
         verifyBeforeReverting(ref, "Rejected", () => {
           if (previousEntry) assignmentCache[ref] = previousEntry;
           else delete assignmentCache[ref];
-          lastLocalChangeAt[ref] = Date.now();
+          markLocalChange(ref);
           document.querySelectorAll(".dp-assign-cell").forEach(c => {
             if (c.dataset.dpRef === ref) {
               c.dataset.dpAppliedStatus = previousEntry ? previousEntry.status || "" : "";
