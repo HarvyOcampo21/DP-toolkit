@@ -320,8 +320,10 @@
     font-family: inherit; text-align: left; cursor: pointer; /* so a <button> matches the <a> links */
   }
   .quick-link-btn:hover { border-color: #00d1b2; color: #00d1b2; }
+  .quick-link-btn:disabled { opacity: 0.6; cursor: default; }
+  .quick-link-btn:disabled:hover { border-color: #353b4d; color: #9aa0ad; }
 
-  /* ── Footer: connection status + force sync + version ── */
+  /* ── Footer: connection status + compact settings + version ── */
   #dpFooter {
     flex-shrink: 0;
     margin-top: 16px; padding-top: 12px; border-top: 1px solid #2b2f3d;
@@ -332,14 +334,73 @@
   #dpConnDot.dot-ok    { background: #00d1b2; }
   #dpConnDot.dot-warn  { background: #e6941a; }
   #dpConnDot.dot-error { background: #ef4444; }
-  #dpForceSyncBtn {
+  /* Compact — replaces the old full-width "⚙ Settings" button that used
+     to sit inline with Active Assignments; Force Sync moved inside the
+     drawer this opens (see #dpForceSyncBtn's new styling, reusing
+     .quick-link-btn, further down). */
+  .dp-footer-settings-btn {
+    display: flex; align-items: center; gap: 4px; font-family: inherit;
     background: #262a38; border: 1px solid #353b4d; color: #9aa0ad;
     border-radius: 6px; padding: 4px 9px; font-size: 0.7rem; font-weight: 700;
     cursor: pointer; white-space: nowrap;
   }
-  #dpForceSyncBtn:hover:not(:disabled) { border-color: #00d1b2; color: #00d1b2; }
-  #dpForceSyncBtn:disabled { opacity: 0.6; cursor: default; }
+  .dp-footer-settings-btn:hover { border-color: #00d1b2; color: #00d1b2; }
   #dpVersionText { font-size: 0.72rem; color: #6b7280; font-family: monospace; }
+
+  /* ── Date/time (above Quick Report) ── */
+  .dp-datetime {
+    display: none; /* shown by showMain() once a name is set — matches #identityBar's own default */
+    font-size: 11px; color: #6b7280; margin: -6px 0 14px; flex-shrink: 0;
+  }
+  .dp-datetime-time { color: #00d1b2; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* ── Quick Report: compact, collapsible, TODAY + all-editors summary.
+     Sits above Active Assignments and outside #assignSection's own flex
+     scroll area, so it always keeps its natural (collapsed or expanded)
+     height rather than competing with the assignment list for space —
+     Active Assignments is still the only thing that actually scrolls. ── */
+  .dp-quickreport {
+    display: none; /* shown by showMain() once a name is set */
+    flex-shrink: 0; margin-bottom: 14px;
+  }
+  .dp-qr-body {
+    max-height: 240px; opacity: 1; overflow: hidden;
+    transition: max-height 0.22s ease, opacity 0.18s ease;
+  }
+  .dp-qr-body.is-collapsed { max-height: 0; opacity: 0; }
+  /* Applied only for the very first paint (restoring a saved collapsed
+     state) so that initial snap-into-place never itself animates —
+     removed immediately after, so the next (real, user-clicked) toggle
+     gets its transition back. */
+  .dp-qr-body.dp-qr-no-anim { transition: none; }
+
+  .dp-qr-table { display: flex; flex-direction: column; gap: 3px; padding-bottom: 8px; }
+  .dp-qr-row {
+    display: grid; grid-template-columns: 1.3fr repeat(4, 0.8fr) 0.8fr;
+    gap: 4px; align-items: center;
+  }
+  .dp-qr-cell { font-size: 11px; color: #c7cbd8; text-align: right; }
+  .dp-qr-cell:first-child { text-align: left; }
+  .dp-qr-header .dp-qr-cell {
+    color: #6b7280; font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: 0.04em; font-weight: 700;
+  }
+  .dp-qr-editor { font-weight: 700; color: #e3e6ee; }
+  .dp-qr-total  { font-weight: 700; color: #00d1b2; }
+  .dp-qr-totalrow { border-top: 1px solid #2b2f3d; padding-top: 5px; margin-top: 3px; }
+  .dp-qr-totalrow .dp-qr-editor { color: #c7cbd8; }
+  .dp-qr-empty { color: #6b7280; font-size: 11px; padding: 2px 0 8px; }
+
+  .dp-qr-toggle {
+    display: flex; align-items: center; justify-content: center; width: 100%;
+    background: none; border: none; cursor: pointer; padding: 2px 0 4px;
+  }
+  .dp-qr-arrow {
+    display: inline-block; color: #6b7280; font-size: 13px; line-height: 1;
+    transition: transform 0.2s ease, color 0.15s ease;
+  }
+  .dp-qr-toggle:hover .dp-qr-arrow { color: #00d1b2; }
+  .dp-qr-arrow.is-collapsed { transform: rotate(180deg); }
 </style>
 </head>
 <body>
@@ -364,6 +425,24 @@
         <span class="who" id="whoText"></span>
       </div>
       <button id="changeNameBtn">Change name</button>
+    </div>
+
+    <div id="dpDateTime" class="dp-datetime"></div>
+
+    <!-- ── Quick Report: a compact, TODAY-only, team-wide summary — not the
+         Assignment Dashboard's date-range report, intentionally always
+         "today". Collapsible so Active Assignments (the panel's real
+         priority) keeps as much vertical space as possible; state
+         persisted in chrome.storage.local so it doesn't reset on every
+         sync/refresh. ── -->
+    <div id="dpQuickReport" class="dp-quickreport">
+      <div class="section-title">Quick Report</div>
+      <div id="dpQuickReportBody" class="dp-qr-body">
+        <div id="dpQuickReportTable" class="dp-qr-table"></div>
+      </div>
+      <button type="button" id="dpQuickReportToggle" class="dp-qr-toggle" title="Show/hide Quick Report">
+        <span id="dpQuickReportArrow" class="dp-qr-arrow">▾</span>
+      </button>
     </div>
 
     <!-- ── Assignments ── -->
@@ -399,8 +478,6 @@
       </div>
 
       <hr class="divider">
-
-      <button type="button" id="dpSettingsOpenBtn" class="quick-link-btn">⚙ Settings</button>
     </div>
 
     <div id="dpFooter">
@@ -408,16 +485,16 @@
         <div id="dpConnDot" class="dot-warn"></div>
         <span id="dpConnText">Checking…</span>
       </div>
-      <button id="dpForceSyncBtn" title="Re-check connection and re-fetch the latest data from the Sheet, bypassing any local cache">⟳ Force Sync</button>
+      <button type="button" id="dpSettingsOpenBtn" class="dp-footer-settings-btn">⚙ Settings</button>
       <span id="dpVersionText"></span>
     </div>
 
   </div>
 
   <!-- ── Settings drawer: slides up from the bottom, hidden until opened.
-       Houses Auto-Refresh CRM + Configuration (moved here from the CRM
-       page's own filter bar) + Quick Links. Fixed-position so it overlays
-       everything, including the pinned footer. ── -->
+       Houses Force Sync + Auto-Refresh CRM + Configuration (moved here
+       from the CRM page's own filter bar) + Quick Links. Fixed-position
+       so it overlays everything, including the pinned footer. ── -->
   <div id="dpSettingsBackdrop" class="dp-settings-backdrop"></div>
   <div id="dpSettingsDrawer" class="dp-settings-drawer">
     <div class="dp-settings-drawer-handle"></div>
@@ -426,6 +503,10 @@
       <button type="button" id="dpSettingsCloseBtn" class="dp-settings-close" title="Close">✕</button>
     </div>
     <div class="dp-settings-drawer-body">
+
+      <button type="button" id="dpForceSyncBtn" class="quick-link-btn" title="Re-check connection and re-fetch the latest data from the Sheet, bypassing any local cache">⟳ Force Sync</button>
+
+      <hr class="divider">
 
       <div class="section-title">Auto-Refresh CRM</div>
       <div class="dp-toggle-row">

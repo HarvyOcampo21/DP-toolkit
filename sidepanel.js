@@ -58,6 +58,8 @@ const saveBtn        = document.getElementById("saveBtn");
 const whoText        = document.getElementById("whoText");
 const changeBtn      = document.getElementById("changeNameBtn");
 const assignSection  = document.getElementById("assignSection");
+const dpDateTimeEl   = document.getElementById("dpDateTime");
+const dpQuickReportEl = document.getElementById("dpQuickReport");
 
 const listContainer  = document.getElementById("listContainer");
 const totalBadge     = document.getElementById("totalBadge");
@@ -77,18 +79,25 @@ const autoAllCountdownCopyEl = document.getElementById("dpAutoAllCountdownCopy")
 function showSetup() {
   setupDiv.style.display     = "block";
   identityBar.style.display  = "none";
+  dpDateTimeEl.style.display = "none";
+  dpQuickReportEl.style.display = "none";
   assignSection.style.display = "none";
   stopLivePolling();
+  stopDateTimeClock();
 }
 
 function showMain(name, role) {
   setupDiv.style.display      = "none";
   identityBar.style.display   = "flex";
+  dpDateTimeEl.style.display  = "block";
+  dpQuickReportEl.style.display = "block";
   assignSection.style.display = "flex";
 
   currentUserName = name;
   currentUserRole = role;
   whoText.textContent = `Hi, ${name}!`;
+  startDateTimeClock();
+  initQuickReportCollapse();
 
   const autoAssignSection = document.getElementById("dpAutoAssignSection");
   if (autoAssignSection) autoAssignSection.style.display = role === "senior" ? "block" : "none";
@@ -306,6 +315,167 @@ function computeTodayStats(fullAssignments, name) {
   return { completed, rejected, total: completed + rejected };
 }
 
+// ── Live date/time ────────────────────────────────────────────────────────
+// Purely decorative/informational — local device time, ticking every
+// second while the panel is visible. Never touches assignment state or
+// polling; entirely independent of everything else in this file.
+let dpDateTimeTimer = null;
+function renderDateTime() {
+  if (!dpDateTimeEl) return;
+  const now = new Date();
+  const datePart = now.toLocaleDateString(undefined, {
+    weekday: "short", month: "short", day: "numeric", year: "numeric",
+  });
+  const timePart = now.toLocaleTimeString(undefined, {
+    hour: "numeric", minute: "2-digit", second: "2-digit",
+  });
+  dpDateTimeEl.textContent = ""; // clear rather than innerHTML — timePart needs its own styled span, everything else is plain text
+  dpDateTimeEl.appendChild(document.createTextNode(datePart + " · "));
+  const timeSpan = document.createElement("span");
+  timeSpan.className = "dp-datetime-time";
+  timeSpan.textContent = timePart;
+  dpDateTimeEl.appendChild(timeSpan);
+}
+function startDateTimeClock() {
+  stopDateTimeClock();
+  renderDateTime();
+  dpDateTimeTimer = setInterval(renderDateTime, 1000);
+}
+function stopDateTimeClock() {
+  if (dpDateTimeTimer) { clearInterval(dpDateTimeTimer); dpDateTimeTimer = null; }
+}
+
+// ── Quick Report (Today, all editors) ────────────────────────────────────
+// A compact, always-TODAY, team-wide summary — deliberately NOT the
+// Assignment Dashboard's date-range report (no Today/Yesterday/Custom
+// Range filters here; see the "Sidepanel UI Redesign" requirements doc).
+// Purely observational: reads allAssignmentsForAutoAssign, the same
+// already-fresh data (kept current by refreshFromServer's poll AND
+// applyLivePatch's instant push — see there) that Next Up already uses.
+// Never writes or otherwise touches assignment state — this only ever
+// summarizes what's already true elsewhere.
+//
+// Completed/Rejected are counted the same way Today's Activity already
+// does (see computeTodayStats): off each row's own history log, so a
+// restarted/reshot listing still correctly attributes whichever cycle's
+// event actually happened today. Pending/On Hold are a live snapshot of
+// current outstanding workload instead — those describe what's open
+// right now, not something that already happened today, so date-filtering
+// them wouldn't make sense the same way.
+function computeQuickReport(allAssignments) {
+  const perEditor = {};
+  function bump(editor, key) {
+    if (!editor) return;
+    if (!perEditor[editor]) perEditor[editor] = { completed: 0, pending: 0, onHold: 0, rejected: 0 };
+    perEditor[editor][key]++;
+  }
+  (allAssignments || []).forEach(a => {
+    if (!a || !a.editor) return;
+    const historyLog = Array.isArray(a.history) ? a.history : [];
+    historyLog.forEach(e => {
+      if (!e || !e.ts) return;
+      if (e.type === "completed" && isToday(e.ts)) bump(a.editor, "completed");
+      if (e.type === "rejected"  && isToday(e.ts)) bump(a.editor, "rejected");
+    });
+    if (a.status === "On Hold") bump(a.editor, "onHold");
+    else if (a.status === "Assigned" || a.status === "In Progress") bump(a.editor, "pending");
+  });
+
+  const rows = Object.keys(perEditor).sort().map(editor => {
+    const s = perEditor[editor];
+    return { editor, ...s, total: s.completed + s.pending + s.onHold + s.rejected };
+  });
+  const totals = rows.reduce((acc, r) => {
+    acc.completed += r.completed; acc.pending += r.pending;
+    acc.onHold += r.onHold; acc.rejected += r.rejected; acc.total += r.total;
+    return acc;
+  }, { completed: 0, pending: 0, onHold: 0, rejected: 0, total: 0 });
+
+  return { rows, totals };
+}
+
+// Built via DOM methods rather than innerHTML templating — editor names
+// are always plain text either way, this just avoids the topic entirely.
+function qrRow(cells, opts) {
+  const row = document.createElement("div");
+  row.className = "dp-qr-row" + (opts && opts.header ? " dp-qr-header" : "") + (opts && opts.totalRow ? " dp-qr-totalrow" : "");
+  cells.forEach((text, i) => {
+    const cell = document.createElement("span");
+    cell.className = "dp-qr-cell" + (i === 0 ? " dp-qr-editor" : "") + (i === cells.length - 1 ? " dp-qr-total" : "");
+    cell.textContent = text;
+    row.appendChild(cell);
+  });
+  return row;
+}
+
+function renderQuickReport() {
+  const tableEl = document.getElementById("dpQuickReportTable");
+  if (!tableEl) return;
+  const { rows, totals } = computeQuickReport(allAssignmentsForAutoAssign);
+  tableEl.innerHTML = "";
+
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "dp-qr-empty";
+    empty.textContent = "No activity yet today.";
+    tableEl.appendChild(empty);
+    return;
+  }
+
+  tableEl.appendChild(qrRow(["", "Done", "Pending", "Hold", "Rej.", "Total"], { header: true }));
+  rows.forEach(r => {
+    tableEl.appendChild(qrRow([r.editor, String(r.completed), String(r.pending), String(r.onHold), String(r.rejected), String(r.total)]));
+  });
+  tableEl.appendChild(qrRow(["Total", String(totals.completed), String(totals.pending), String(totals.onHold), String(totals.rejected), String(totals.total)], { totalRow: true }));
+}
+
+// ── Quick Report collapse/expand ─────────────────────────────────────────
+// A personal display preference, not an automation setting — unlike
+// Auto-assign/Auto-Refresh CRM (see myWindowId above) this deliberately
+// is NOT window-scoped; there's no meaningful reason someone would want a
+// different collapse state per window. Persisted so it doesn't reset on
+// every open/sync (see the requirements doc's "must not visually jump
+// open/closed" point) — this state is purely local UI, never touched by
+// refreshFromServer/applyLivePatch/renderList, so a background sync can
+// never cause it to jump either.
+const DP_QR_COLLAPSED_KEY = "dpQuickReportCollapsed";
+let quickReportCollapsed = false;
+
+function applyQuickReportCollapseState(animate) {
+  const bodyEl = document.getElementById("dpQuickReportBody");
+  const arrowEl = document.getElementById("dpQuickReportArrow");
+  if (!bodyEl || !arrowEl) return;
+  if (!animate) {
+    bodyEl.classList.add("dp-qr-no-anim");
+    bodyEl.classList.toggle("is-collapsed", quickReportCollapsed);
+    arrowEl.classList.toggle("is-collapsed", quickReportCollapsed);
+    // Force layout so the no-anim class actually takes effect for this
+    // paint, then drop it so the next (real, user-clicked) toggle gets
+    // its transition back.
+    void bodyEl.offsetHeight;
+    bodyEl.classList.remove("dp-qr-no-anim");
+  } else {
+    bodyEl.classList.toggle("is-collapsed", quickReportCollapsed);
+    arrowEl.classList.toggle("is-collapsed", quickReportCollapsed);
+  }
+}
+
+function initQuickReportCollapse() {
+  chrome.storage.local.get([DP_QR_COLLAPSED_KEY], result => {
+    quickReportCollapsed = result[DP_QR_COLLAPSED_KEY] === true;
+    applyQuickReportCollapseState(false);
+  });
+}
+
+const quickReportToggleBtn = document.getElementById("dpQuickReportToggle");
+if (quickReportToggleBtn) {
+  quickReportToggleBtn.addEventListener("click", () => {
+    quickReportCollapsed = !quickReportCollapsed;
+    applyQuickReportCollapseState(true);
+    try { chrome.storage.local.set({ [DP_QR_COLLAPSED_KEY]: quickReportCollapsed }); } catch (e) { /* non-fatal */ }
+  });
+}
+
 function renderTodayStats() {
   if (!statCompletedEl || !statRejectedEl || !statTotalEl) return;
   statCompletedEl.textContent = String(currentTodayStats.completed);
@@ -412,6 +582,7 @@ function renderOnDutyList() {
 function renderAutoAssignSettings() {
   renderNextUpLine();
   renderOnDutyList();
+  renderQuickReport();
 }
 
 // ── Local snapshot cache ─────────────────────────────────────────────────
@@ -1006,6 +1177,12 @@ function applyLivePatch(ref, patch, downloaded, ts) {
 
   if (patch) assignmentByRef[ref] = typeof downloaded === "boolean" ? { ...patch, downloaded } : patch;
   else delete assignmentByRef[ref];
+
+  // Keeps Quick Report (and Next Up, which already read this) instantly
+  // in sync too — without this, both would only ever see a live-pushed
+  // change once the next full poll happened to run, defeating the whole
+  // point of pushing it instantly in the first place.
+  allAssignmentsForAutoAssign = Object.values(assignmentByRef);
 
   chrome.storage.local.get(["myName"], ({ myName }) => {
     if (!myName) return;

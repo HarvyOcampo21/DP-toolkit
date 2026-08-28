@@ -236,6 +236,10 @@ const CHANGELOG = [
       { version: 89, notes: [
     "Auto-Assign is now much more resilient during large batches (20+ fresh listings at once). Previously, if Apps Script's write for one assignment hadn't landed \u2014 or landed with an empty Assignee \u2014 by the time the next poll came back roughly a minute later, that poll's incomplete data could get treated as truth and the listing could become eligible to be auto-assigned a second time. A locally-claimed listing now stays protected until a genuinely complete, confirmed record shows up for it \u2014 not just after a fixed wait \u2014 so an ambiguous or still-in-flight backend response can no longer cause a duplicate assignment. Nothing reverts a claimed listing back to unassigned except an explicit, confirmed write failure.",
   ]},
+      { version: 90, notes: [
+    "Side panel redesign: added the current date/time and a collapsible \u201cQuick Report\u201d (today only, every editor, Completed/Pending/On Hold/Rejected/Total) above Active Assignments, with an animated arrow to show/hide it \u2014 its expanded/collapsed state is remembered and never gets disturbed by polling, Force Sync, or a live update coming in.",
+    "Removed the large full-width Settings button to give Active Assignments more room. Settings is now a compact button in the footer, between the connection status and the version number. Force Sync moved inside Settings (same functionality, same button, just relocated) instead of sitting in the footer on its own.",
+  ]},
 ];
 
 const card = document.getElementById("card");
