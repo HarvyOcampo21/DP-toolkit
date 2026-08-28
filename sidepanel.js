@@ -358,10 +358,17 @@ function stopDateTimeClock() {
 // Completed/Rejected are counted the same way Today's Activity already
 // does (see computeTodayStats): off each row's own history log, so a
 // restarted/reshot listing still correctly attributes whichever cycle's
-// event actually happened today. Pending/On Hold are a live snapshot of
-// current outstanding workload instead — those describe what's open
-// right now, not something that already happened today, so date-filtering
-// them wouldn't make sense the same way.
+// event actually happened today.
+//
+// Pending/On Hold are also scoped to today: an assignment only counts if
+// it was actually assigned/reassigned today (same effectiveAt = reassignedAt
+// || assignedAt pattern getAutoAssignRecommendation already uses further
+// down). A listing that's simply still sitting open from a previous day
+// must NOT pull its editor into today's report just because it's still
+// technically "theirs" — see the "Quick Report Must Be Strictly Today"
+// requirements doc. This also means perEditor only ever gets an entry via
+// bump(), so a row simply won't exist for an editor with zero today
+// activity — no separate empty-row filter needed.
 function computeQuickReport(allAssignments) {
   const perEditor = {};
   function bump(editor, key) {
@@ -377,8 +384,11 @@ function computeQuickReport(allAssignments) {
       if (e.type === "completed" && isToday(e.ts)) bump(a.editor, "completed");
       if (e.type === "rejected"  && isToday(e.ts)) bump(a.editor, "rejected");
     });
-    if (a.status === "On Hold") bump(a.editor, "onHold");
-    else if (a.status === "Assigned" || a.status === "In Progress") bump(a.editor, "pending");
+    const effectiveAt = a.reassignedAt || a.assignedAt;
+    if (effectiveAt && isToday(effectiveAt)) {
+      if (a.status === "On Hold") bump(a.editor, "onHold");
+      else if (a.status === "Assigned" || a.status === "In Progress") bump(a.editor, "pending");
+    }
   });
 
   const rows = Object.keys(perEditor).sort().map(editor => {
