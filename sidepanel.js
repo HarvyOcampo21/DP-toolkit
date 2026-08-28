@@ -29,6 +29,27 @@ let currentUserName = null; // set once in showMain — lets tab clicks re-rende
 let currentUserRole = null; // "senior" | "junior" — gates the Settings drawer's Auto-assign/On duty rows
 let lastRefreshOk = true; // tracks the ok/fail transition so refreshFromServer only toasts once per outage, not every poll
 
+// ── This window's identity ───────────────────────────────────────────────
+// Every automation setting that shouldn't leak across separate Chrome
+// windows (Auto Assign, Auto-Refresh CRM / "Auto All Click") is stored
+// under a key suffixed with this window's own id — see the "independent
+// automation across Chrome windows/macOS Spaces" requirements doc. macOS
+// Spaces are NOT separate Chrome instances; they're different desktops
+// showing different windows of the SAME browser, so a window's id is the
+// only real unit of isolation actually available here. A side panel is an
+// extension page (not a content script), so unlike assigner-content.js it
+// can call chrome.windows.getCurrent() directly with no message relay
+// through the background worker needed.
+let myWindowId = null;
+const dpWindowReadyPromise = new Promise(resolve => {
+  chrome.windows.getCurrent({ populate: false }, win => {
+    myWindowId = win && win.id != null ? win.id : null;
+    resolve(myWindowId);
+  });
+});
+function autoAssignKeyForThisWindow() { return `dpAutoAssignEnabled:${myWindowId}`; }
+function autoAllClickKeyForThisWindow() { return `dpAutoAllClick:${myWindowId}`; }
+
 // ── Elements ────────────────────────────────────────────────────────────
 const setupDiv      = document.getElementById("setup");
 const identityBar    = document.getElementById("identityBar");
@@ -1283,8 +1304,15 @@ if (dpVersionText) {
 // so it keeps running even if this panel gets closed — all this does is
 // read/write the setting in chrome.storage.local. background.js reacts to
 // the storage change on its own; there's no message to send here.
-const AUTO_ALL_CLICK_KEY   = "dpAutoAllClick";
-const AUTO_ALL_CLICK_ALARM = "dpAutoAllClick"; // must match background.js's alarm name
+//
+// Scoped to THIS window only (see myWindowId above), same reasoning as
+// Auto-assign above — a schedule turned on here must never start
+// refreshing (or stop refreshing) a CRM tab living in a different window.
+// AUTO_ALL_CLICK_KEY/AUTO_ALL_CLICK_ALARM below are resolved lazily
+// (functions, not constants) since myWindowId isn't known synchronously
+// at script-load time — see dpWindowReadyPromise.
+function AUTO_ALL_CLICK_KEY()   { return autoAllClickKeyForThisWindow(); } // storage key
+function AUTO_ALL_CLICK_ALARM() { return autoAllClickKeyForThisWindow(); } // must match background.js's alarm-name prefix + windowId
 
 function renderAutoAllUI(settings) {
   if (!autoAllToggle) return;
@@ -1304,11 +1332,17 @@ function renderAutoAllUI(settings) {
 }
 
 function saveAutoAllClickSettings() {
-  chrome.storage.local.set({
-    [AUTO_ALL_CLICK_KEY]: {
-      enabled: autoAllToggle.checked,
-      intervalMinutes: Number(autoAllIntervalInput.value) || 5,
-    },
+  // Guards against the (extremely unlikely) case of this firing before
+  // myWindowId has resolved — see dpWindowReadyPromise above. In practice
+  // this promise resolves almost immediately on load, long before a
+  // person could actually interact with the toggle/slider.
+  dpWindowReadyPromise.then(() => {
+    chrome.storage.local.set({
+      [AUTO_ALL_CLICK_KEY()]: {
+        enabled: autoAllToggle.checked,
+        intervalMinutes: Number(autoAllIntervalInput.value) || 5,
+      },
+    });
   });
 }
 
@@ -1337,7 +1371,7 @@ function tickAutoAllCountdown() {
   if (!autoAllCountdownEl) return;
   if (!autoAllToggle.checked) { setAutoAllCountdownText(""); return; }
 
-  chrome.alarms.get(AUTO_ALL_CLICK_ALARM, alarm => {
+  chrome.alarms.get(AUTO_ALL_CLICK_ALARM(), alarm => {
     if (!autoAllToggle.checked) { setAutoAllCountdownText(""); return; }
     if (!alarm) { setAutoAllCountdownText("Starting…"); return; }
 
@@ -1367,7 +1401,9 @@ document.addEventListener("visibilitychange", () => {
 });
 
 if (autoAllToggle) {
-  chrome.storage.local.get([AUTO_ALL_CLICK_KEY], result => renderAutoAllUI(result[AUTO_ALL_CLICK_KEY]));
+  dpWindowReadyPromise.then(() => {
+    chrome.storage.local.get([AUTO_ALL_CLICK_KEY()], result => renderAutoAllUI(result[AUTO_ALL_CLICK_KEY()]));
+  });
 
   autoAllToggle.addEventListener("change", () => {
     autoAllIntervalWrap.style.display = autoAllToggle.checked ? "block" : "none";
@@ -1436,28 +1472,39 @@ if (openNewTabToggle) {
 }
 
 // ── Configuration: Auto-assign ──────────────────────────────────────────
-// Same live-storage-key relationship as Open in new tab above. One
-// difference: assigner-content.js deliberately forces this back to OFF
-// (and writes that OFF state back here) every time a CRM tab freshly loads
-// — a safety net so the auto-assigner never silently keeps running off a
-// stale "on" from a previous session. That means this toggle can appear to
-// flip itself off if a CRM tab reloads while it was on; that's expected,
-// not a bug — just flip it back on here to resume.
+// Scoped to THIS window only (see myWindowId above) — per the "independent
+// automation across Chrome windows/macOS Spaces" requirement, toggling
+// this in one window's side panel must never affect any other window's
+// automation. One difference from a plain settings toggle:
+// assigner-content.js deliberately forces this back to OFF (and writes
+// that OFF state back here) every time a CRM tab in THIS SAME window
+// freshly loads — a safety net so the auto-assigner never silently keeps
+// running off a stale "on" from a previous session. That means this
+// toggle can appear to flip itself off if a CRM tab in this window
+// reloads while it was on; that's expected, not a bug — just flip it back
+// on here to resume. A CRM tab reloading in a DIFFERENT window has no
+// effect on this at all.
 const autoAssignToggle = document.getElementById("dpAutoAssignToggle");
 if (autoAssignToggle) {
-  chrome.storage.local.get(["dpAutoAssignEnabled"], result => {
-    autoAssignToggle.checked = result.dpAutoAssignEnabled === true;
+  dpWindowReadyPromise.then(() => {
+    chrome.storage.local.get([autoAssignKeyForThisWindow()], result => {
+      autoAssignToggle.checked = result[autoAssignKeyForThisWindow()] === true;
+    });
   });
   autoAssignToggle.addEventListener("change", () => {
-    chrome.storage.local.set({ dpAutoAssignEnabled: autoAssignToggle.checked });
+    dpWindowReadyPromise.then(() => {
+      chrome.storage.local.set({ [autoAssignKeyForThisWindow()]: autoAssignToggle.checked });
+    });
   });
 
   // Keeps this toggle in sync if assigner-content.js resets it (see above)
-  // while the drawer happens to be open, or from another instance of this
-  // side panel.
+  // while the drawer happens to be open — scoped to this window's own key
+  // only, so a change from another window's side panel or CRM tab is
+  // ignored entirely rather than bleeding into this one.
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && changes.dpAutoAssignEnabled) {
-      autoAssignToggle.checked = changes.dpAutoAssignEnabled.newValue === true;
-    }
+    if (area !== "local" || myWindowId == null) return;
+    const key = autoAssignKeyForThisWindow();
+    if (changes[key]) autoAssignToggle.checked = changes[key].newValue === true;
   });
 }
+

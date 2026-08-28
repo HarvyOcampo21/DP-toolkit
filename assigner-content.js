@@ -147,10 +147,16 @@
   // assign() codepath a senior clicking a popover option would hit —
   // optimistic local update, write to the Sheet, verify-before-reverting
   // on a flaky response — via the __dpAssign hook renderAssignCell exposes.
-  // With more than one CRM tab open in this same browser, only the
+  // With more than one CRM tab open in the SAME browser window, only the
   // "first" one — see checkAutoAssignLeadership below — is allowed to fire
   // auto-assign writes at all, so two tabs racing to assign the same
-  // brand-new listing is no longer really possible within one browser.
+  // brand-new listing is no longer really possible within one window.
+  // Leadership is scoped per-window, not across the whole browser — see
+  // DP_CHECK_AUTO_ASSIGN_LEADER in background.js — which is also what
+  // makes independent automation across separate Chrome windows/macOS
+  // Spaces possible at all: each window elects its own leader among its
+  // own CRM tabs, so turning this on in one window's tabs never fights
+  // over "who's the leader" with a completely different window.
   // (This doesn't extend across separate machines/browser profiles — each
   // has no visibility into the other's open tabs — so the jitter below
   // still matters as a cross-machine safety net, same as before.)
@@ -199,15 +205,17 @@
 
   // Asks the background worker whether THIS tab is the "first CRM tab" —
   // i.e. tabs[0] out of every currently-open tab matching the /photorequest/*
-  // pattern, in the same left-to-right tab-strip order chrome.tabs.query
-  // already uses elsewhere in this extension (see handleAutoSearch's
-  // "second CRM tab" targeting in background.js). Only that one tab is
-  // allowed to actually fire auto-assign writes — see maybeAutoAssign
-  // above. Cheap enough (one small message round-trip, no Sheet access) to
-  // just call every poll cycle rather than maintain any registration
-  // state of our own; if the answer comes back different from before, we
-  // don't need to do anything special either way — maybeAutoAssign just
-  // reads the current value on its next call.
+  // pattern WITHIN THIS TAB'S OWN BROWSER WINDOW (not across the whole
+  // browser — see DP_CHECK_AUTO_ASSIGN_LEADER's own comment in
+  // background.js for why), in the same left-to-right tab-strip order
+  // chrome.tabs.query already uses elsewhere in this extension (see
+  // handleAutoSearch's "second CRM tab" targeting in background.js). Only
+  // that one tab is allowed to actually fire auto-assign writes — see
+  // maybeAutoAssign above. Cheap enough (one small message round-trip, no
+  // Sheet access) to just call every poll cycle rather than maintain any
+  // registration state of our own; if the answer comes back different
+  // from before, we don't need to do anything special either way —
+  // maybeAutoAssign just reads the current value on its next call.
   function checkAutoAssignLeadership() {
     safeSendMessage({ type: "DP_CHECK_AUTO_ASSIGN_LEADER" }, resp => {
       isAutoAssignLeaderTab = !!(resp && resp.ok && resp.isLeader);
@@ -314,6 +322,17 @@
   // fail-safe direction as autoAssignEnabled itself) so a tab never
   // auto-assigns before it's actually confirmed leadership.
   let isAutoAssignLeaderTab = false;
+  // This tab's own browser window id — content scripts have no direct
+  // chrome.tabs/chrome.windows access, so this is learned once via a
+  // message round-trip to the background worker (see DP_GET_CONTEXT) and
+  // cached here. Needed so this tab's Auto-assign toggle reads/writes a
+  // window-scoped storage key (dpAutoAssignEnabled:<windowId>) rather than
+  // a single key shared by every CRM tab in every window — see the
+  // "independent automation across Chrome windows/macOS Spaces"
+  // requirements doc for why. Stays null until resolved; every read/write
+  // below is guarded on that.
+  let myWindowId = null;
+  function autoAssignKeyForThisWindow() { return `dpAutoAssignEnabled:${myWindowId}`; }
   // Stays false until the very first Apps Script fetch has come back and
   // been rendered once. Without this, turning the toggle on would, on
   // page load, treat every listing that's been sitting Unassigned for
@@ -600,8 +619,15 @@
       if (changes.dpOpenListingNewTab) {
         openListingInNewTabEnabled = changes.dpOpenListingNewTab.newValue === true;
       }
-      if (changes.dpAutoAssignEnabled) {
-        autoAssignEnabled = changes.dpAutoAssignEnabled.newValue === true;
+      // Window-scoped — a change to some OTHER window's Auto-assign key
+      // shows up in `changes` too (chrome.storage.onChanged fires for every
+      // key change in the whole extension, not just ones we care about),
+      // but only reacts here if it's specifically THIS tab's own window's
+      // key. myWindowId being null (not resolved yet) means every key
+      // simply gets ignored for the moment — self-corrects the instant
+      // DP_GET_CONTEXT resolves and the real current value gets hydrated.
+      if (myWindowId != null && changes[autoAssignKeyForThisWindow()]) {
+        autoAssignEnabled = changes[autoAssignKeyForThisWindow()].newValue === true;
       }
     });
   }
@@ -3827,6 +3853,30 @@
   }), 800);
 
   // ── Init (reads role + name from storage before starting) ───────────────
+  // Kicked off in parallel with the storage.local.get below, not chained
+  // after it — nothing else in this init block actually depends on
+  // myWindowId, so there's no reason to make every tab's first paint wait
+  // on this extra message round-trip. Only the Auto-assign reset below
+  // (and the storage.onChanged listener above) are gated on it resolving.
+  safeSendMessage({ type: "DP_GET_CONTEXT" }, resp => {
+    if (!(resp && resp.ok)) return;
+    myWindowId = resp.windowId;
+    // Auto-assign is intentionally NEVER restored from a prior session —
+    // every fresh page load/refresh starts with it OFF, full stop, even if
+    // it was left on before (from this tab, another tab in the SAME
+    // window, or that window's side panel). It has to be turned back on by
+    // hand each time. We also write that OFF state back to storage — under
+    // THIS window's own key only, see autoAssignKeyForThisWindow — so that
+    // window's side panel toggle reflects the same reset, rather than
+    // showing "on" for a feature that's actually just gone quiet. A
+    // reload in a completely different window never touches this window's
+    // key at all.
+    autoAssignEnabled = false;
+    try {
+      chrome.storage.local.set({ [autoAssignKeyForThisWindow()]: false });
+    } catch (e) {}
+  });
+
   chrome.storage.local.get(["role", "myName", "dpAssignSnapshot", "dpOpenListingNewTab"], result => {
     ROLE = (result && result.role) || "senior";
     MY_NAME = (result && result.myName) || "";
@@ -3834,17 +3884,6 @@
     // the side panel's Settings drawer; kept live afterward by the
     // chrome.storage.onChanged listener further below.
     openListingInNewTabEnabled = !!(result && result.dpOpenListingNewTab === true);
-    // Auto-assign is intentionally NEVER restored from a prior session —
-    // every fresh page load/refresh starts with it OFF, full stop, even if
-    // it was left on before (from this tab or the side panel). It has to
-    // be turned back on by hand each time. We also write that OFF state
-    // back to storage so the side panel's toggle reflects the same reset,
-    // rather than showing "on" for a feature that's actually just gone
-    // quiet in every tab.
-    autoAssignEnabled = false;
-    try {
-      chrome.storage.local.set({ dpAutoAssignEnabled: false });
-    } catch (e) {}
 
     // Hydrate from the last-known snapshot (saved after every successful
     // refresh — see refreshAssignments) BEFORE the first render pass runs.

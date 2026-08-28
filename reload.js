@@ -227,6 +227,9 @@ const CHANGELOG = [
     "CRM \u2194 side panel sync is now genuinely instant in both directions, not just \u201cwithin about a second.\u201d Every action (Start, Hold, Downloaded, assign, complete, reject, restart, etc.) is now pushed directly from wherever it happened to every other open CRM tab and the side panel the moment it's clicked \u2014 before the Sheet write even finishes, not after. Google Sheets stays the source of truth for persistence, but it's no longer the trigger for the visual update.",
     "Fixed a real flicker bug: a background poll landing at just the wrong moment (after a click, but before that click's own write had actually finished saving) could revert a correct optimistic status change back to the old value for a few seconds before self-correcting. Both surfaces now protect a fresh local change for a full 50 seconds \u2014 long enough to comfortably outlast a slow write \u2014 so a still-in-flight action can no longer be overwritten by stale data. This was already partly true on the CRM tab; the side panel had no such protection at all until now.",
   ]},
+      { version: 87, notes: [
+    "Auto-assign and Auto-Refresh CRM are now scoped per Chrome window instead of shared across the whole browser \u2014 turning either one on or off in one window's side panel no longer touches any other window's automation, including one parked on a different macOS Space. Each window elects its own \u201cfirst CRM tab\u201d independently for auto-assign, and gets its own independent refresh schedule for Auto-Refresh CRM, so two windows can run completely different automation states at the same time without interfering with each other. A window's automation settings are also now cleaned up automatically once that window is closed.",
+  ]},
 ];
 
 const card = document.getElementById("card");

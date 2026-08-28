@@ -238,27 +238,53 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   // ── Auto-assign leader election ─────────────────────────────────────────
   // "First CRM tab" = tabs[0] out of every currently-open tab matching
-  // /photorequest/*, in the same left-to-right tab-strip order
-  // chrome.tabs.query already returns elsewhere in this file (see
-  // handleAutoSearch's "second CRM tab" targeting above) — so this reuses
-  // the exact same notion of tab ordering the extension already has,
-  // rather than inventing a new one. No registration list to maintain:
-  // each content script just asks "is it currently me?" on its own poll
-  // cadence (see checkAutoAssignLeadership in assigner-content.js), and
-  // chrome.tabs.query always reflects tabs that are actually open right
-  // now — a closed leader tab simply stops appearing, so the next tab in
-  // strip order becomes tabs[0] and answers "yes" on its very next check.
+  // /photorequest/* WITHIN THE SAME BROWSER WINDOW as the tab asking — see
+  // the "independent automation per Chrome window" requirements doc for
+  // why this is scoped to windowId rather than across the whole browser
+  // the way it originally was. macOS Spaces are NOT separate Chrome
+  // instances — they're just different desktops showing different windows
+  // of the SAME browser process, so windowId is the only real unit of
+  // isolation Chrome actually gives us here; a person running automation
+  // in a Chrome window parked on one Space and working normally in another
+  // window on a different Space needs each window's leader computed
+  // independently, or the "first tab in the whole browser" from an
+  // unrelated window could end up the only one ever allowed to fire, even
+  // while sitting on a Space nobody's using it for automation at all.
+  // Same left-to-right tab-strip ordering as before (see handleAutoSearch's
+  // "second CRM tab" targeting above), just filtered to one window first.
+  // No registration list to maintain: each content script just asks "is it
+  // currently me, in my window?" on its own poll cadence (see
+  // checkAutoAssignLeadership in assigner-content.js), and chrome.tabs.query
+  // always reflects tabs that are actually open right now — a closed leader
+  // tab simply stops appearing, so the next tab in that SAME window's strip
+  // order becomes tabs[0] and answers "yes" on its very next check.
   if (message.type === "DP_CHECK_AUTO_ASSIGN_LEADER") {
     (async () => {
       try {
         const myTabId = _sender && _sender.tab && _sender.tab.id;
-        const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
+        const myWindowId = _sender && _sender.tab && _sender.tab.windowId;
+        const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN, windowId: myWindowId });
         const leaderTabId = tabs.length ? tabs[0].id : null;
         sendResponse({ ok: true, isLeader: myTabId != null && myTabId === leaderTabId });
       } catch (err) {
         sendResponse({ ok: false, error: String(err && err.message || err) });
       }
     })();
+    return true;
+  }
+
+  // ── Window context ────────────────────────────────────────────────────
+  // A content script has no direct access to chrome.tabs/chrome.windows —
+  // only the background worker sees which window a message's sender.tab
+  // actually belongs to — so this is how assigner-content.js learns its
+  // own windowId once on load, needed to read/write the per-window-scoped
+  // automation settings (dpAutoAssignEnabled:<windowId> etc.) introduced
+  // alongside this handler. sidepanel.js doesn't need this: as an
+  // extension page (not a content script) it can call
+  // chrome.windows.getCurrent() directly.
+  if (message.type === "DP_GET_CONTEXT") {
+    const windowId = _sender && _sender.tab && _sender.tab.windowId;
+    sendResponse({ ok: windowId != null, windowId });
     return true;
   }
 
@@ -826,16 +852,35 @@ async function sendFillMessageWithRetry(tabId, ref, attempts = 8) {
 // write straight to chrome.storage.local — no message needed to turn this
 // on/off, we just react to the storage change here. While enabled, once
 // every N minutes (1–60, whatever the slider is set to) this pings the
-// first open CRM Photo Requests tab and has auto-all-click-content.js
-// click that page's own "All" filter button, which forces the board to
-// reload its data. Runs from the background so it keeps going even if the
-// side panel itself gets closed — only flipping the toggle off stops it.
-const AUTO_ALL_CLICK_ALARM   = "dpAutoAllClick";
-const AUTO_ALL_CLICK_STORAGE = "dpAutoAllClick"; // { enabled, intervalMinutes }
+// first open CRM Photo Requests tab IN THAT SAME WINDOW and has
+// auto-all-click-content.js click that page's own "All" filter button,
+// which forces the board to reload its data. Runs from the background so
+// it keeps going even if the side panel itself gets closed — only
+// flipping the toggle off (or closing the window) stops it.
+//
+// Scoped per-window, not globally, per the "independent automation across
+// Chrome windows/macOS Spaces" requirement: each window's side panel
+// writes to its OWN storage key (dpAutoAllClick:<windowId>, set once that
+// panel knows its window's id — see sidepanel.js) and gets its OWN named
+// chrome.alarms entry, so a window with this off never has its board
+// force-refreshed by a schedule that actually belongs to a completely
+// different window, and turning it off in one window can't touch any
+// other window's alarm — they're independent alarms with independent
+// names, not shared state.
+const AUTO_ALL_CLICK_STORAGE_PREFIX = "dpAutoAllClick:"; // + windowId → { enabled, intervalMinutes }
+const AUTO_ALL_CLICK_ALARM_PREFIX   = "dpAutoAllClick:"; // + windowId — same prefix, kept as a separate constant since they're conceptually different namespaces (storage keys vs. alarm names) that just happen to share a spelling
+// Not read anywhere in background.js beyond the cleanup below — this is
+// assigner-content.js's/sidepanel.js's per-window Auto Assign storage key
+// prefix, mirrored here only so chrome.windows.onRemoved can clean up
+// after a closed window without needing to hardcode the string twice.
+const AUTO_ASSIGN_STORAGE_PREFIX = "dpAutoAssignEnabled:"; // + windowId → true/false
 
-async function syncAutoAllClickAlarm() {
-  const result = await chrome.storage.local.get([AUTO_ALL_CLICK_STORAGE]);
-  const settings = result[AUTO_ALL_CLICK_STORAGE];
+async function syncAutoAllClickAlarm(windowId) {
+  if (windowId == null) return;
+  const key = AUTO_ALL_CLICK_STORAGE_PREFIX + windowId;
+  const alarmName = AUTO_ALL_CLICK_ALARM_PREFIX + windowId;
+  const result = await chrome.storage.local.get([key]);
+  const settings = result[key];
   const enabled  = !!(settings && settings.enabled);
   const minutes  = Math.min(60, Math.max(1, Number(settings && settings.intervalMinutes) || 5));
 
@@ -844,31 +889,47 @@ async function syncAutoAllClickAlarm() {
     // (possibly new) interval rather than duplicating it — safe to call
     // this on every service worker wake, same pattern as the assignment
     // notification poller above.
-    chrome.alarms.create(AUTO_ALL_CLICK_ALARM, { periodInMinutes: minutes });
+    chrome.alarms.create(alarmName, { periodInMinutes: minutes });
   } else {
-    chrome.alarms.clear(AUTO_ALL_CLICK_ALARM);
+    chrome.alarms.clear(alarmName);
   }
 }
 
-// Covers both "toggled from the side panel just now" (storage.onChanged
+// Re-establishes every window's own alarm on a fresh service worker wake
+// (browser/extension restart) — chrome.alarms don't survive that, but the
+// settings each window last saved in chrome.storage.local do, so this
+// scans for every dpAutoAllClick:<windowId> key that exists and re-arms
+// each one independently.
+async function resyncAllAutoAllClickAlarms() {
+  const all = await chrome.storage.local.get(null);
+  Object.keys(all)
+    .filter(k => k.startsWith(AUTO_ALL_CLICK_STORAGE_PREFIX))
+    .forEach(k => syncAutoAllClickAlarm(k.slice(AUTO_ALL_CLICK_STORAGE_PREFIX.length)));
+}
+
+// Covers both "toggled from a side panel just now" (storage.onChanged
 // wakes the service worker on its own) and "browser/extension just
 // restarted" (this top-level call runs every time the worker wakes fresh).
-syncAutoAllClickAlarm();
+resyncAllAutoAllClickAlarms();
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes[AUTO_ALL_CLICK_STORAGE]) syncAutoAllClickAlarm();
+  if (area !== "local") return;
+  Object.keys(changes)
+    .filter(k => k.startsWith(AUTO_ALL_CLICK_STORAGE_PREFIX))
+    .forEach(k => syncAutoAllClickAlarm(k.slice(AUTO_ALL_CLICK_STORAGE_PREFIX.length)));
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === AUTO_ALL_CLICK_ALARM) clickAllFilterOnCrmTabs();
+  if (!alarm.name.startsWith(AUTO_ALL_CLICK_ALARM_PREFIX)) return;
+  clickAllFilterOnCrmTabs(alarm.name.slice(AUTO_ALL_CLICK_ALARM_PREFIX.length));
 });
 
-async function clickAllFilterOnCrmTabs() {
-  const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN });
-  // Only the FIRST CRM tab (by the order Chrome reports them — left-to-right
-  // in the tab strip) gets auto-clicked, not every open one — deliberately
-  // the opposite of handleAutoSearch's "always the second tab" above, so
-  // between the two features every CRM tab someone actually works from
-  // stays untouched by this.
+async function clickAllFilterOnCrmTabs(windowId) {
+  const tabs = await chrome.tabs.query({ url: CRM_REQUESTS_URL_PATTERN, windowId: Number(windowId) });
+  // Only the FIRST CRM tab in THIS window (by the order Chrome reports
+  // them — left-to-right in that window's tab strip) gets auto-clicked,
+  // not every open one — deliberately the opposite of handleAutoSearch's
+  // "always the second tab" above, so between the two features every CRM
+  // tab someone actually works from stays untouched by this.
   const tab = tabs[0];
   if (!tab) return;
 
@@ -879,3 +940,17 @@ async function clickAllFilterOnCrmTabs() {
     // currently on the requests list view — just skip this tick.
   }
 }
+
+// A window closing should stop and clean up after itself, not leave an
+// orphaned alarm ticking forever in the background or stale per-window
+// settings sitting in storage indefinitely — this is also what makes
+// "the automation naturally stops once its dedicated window is closed"
+// true without needing any special-cased shutdown logic anywhere else.
+chrome.windows.onRemoved.addListener(windowId => {
+  chrome.alarms.clear(AUTO_ALL_CLICK_ALARM_PREFIX + windowId);
+  chrome.storage.local.remove([
+    AUTO_ALL_CLICK_STORAGE_PREFIX + windowId,
+    AUTO_ASSIGN_STORAGE_PREFIX + windowId,
+  ]);
+});
+
