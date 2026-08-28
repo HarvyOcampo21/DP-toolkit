@@ -594,15 +594,35 @@ function refreshFromServer(name) {
     resp.data.assignments.forEach(a => { if (a && a.ref) freshByRef[a.ref] = a; });
 
     // Cooldown-protected merge — see LOCAL_CHANGE_COOLDOWN_MS's own
-    // comment for the full rationale. Only adopt the fresh value for a
-    // Ref once it's past its cooldown; otherwise keep whatever's already
-    // in assignmentByRef, whether that came from an action taken right
-    // here or a live patch just pushed in from the CRM tab.
+    // comment for the full rationale. Past the normal cooldown, a Ref
+    // that's still locally active (Assigned/In Progress/On Hold — see
+    // ACTIVE_STATUSES) should still not be handed back to a fresh row
+    // that doesn't actually look like a completed write. isTrustworthyFreshRow
+    // is the one signal that reliably tells "confirmed alternate truth"
+    // apart from "Apps Script's write hasn't landed yet" (a real risk
+    // under a large Auto-Assign batch — see the "Auto-Assign reliability"
+    // requirements doc): a genuinely-unassigned row never had anyone claim
+    // it, so an empty editor there is normal; an assigned-ish row missing
+    // its editor, or missing entirely, is exactly the shape of an
+    // in-flight or partially-failed write, not a confirmed alternate
+    // state. This is deliberately not a second, longer timeout — there's
+    // no point at which "no trustworthy row yet" can safely be
+    // reinterpreted as "confirmed unassigned." Only a genuine, confirmed
+    // write failure (see verifyBeforeReverting) is ever allowed to
+    // actually revert something back to Unassigned; this merge only
+    // decides what to display while that resolves.
+    function isTrustworthyFreshRow(fresh) {
+      if (!fresh || !fresh.status) return false;
+      if (fresh.status === "Unassigned") return true; // legitimately editor-less by design
+      return !!fresh.editor;
+    }
     const allRefs = new Set([...Object.keys(assignmentByRef), ...Object.keys(freshByRef)]);
     const merged = {};
     allRefs.forEach(ref => {
       const withinCooldown = (Date.now() - (lastLocalChangeAt[ref] || 0)) < LOCAL_CHANGE_COOLDOWN_MS;
-      const value = withinCooldown ? assignmentByRef[ref] : freshByRef[ref];
+      const locallyActive = assignmentByRef[ref] && ACTIVE_STATUSES.includes(assignmentByRef[ref].status);
+      const protectedFromFresh = withinCooldown || (locallyActive && !isTrustworthyFreshRow(freshByRef[ref]));
+      const value = protectedFromFresh ? assignmentByRef[ref] : freshByRef[ref];
       if (value) merged[ref] = value;
     });
     assignmentByRef = merged;

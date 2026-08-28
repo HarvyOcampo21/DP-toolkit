@@ -239,6 +239,21 @@
   let downloadedCache = {};
   let lastLocalChangeAt = {};
   let refreshInFlight = false;
+  // assignmentCache's entries never store their own Ref or the listing's
+  // own reference code (e.g. "DP-S-63735", as opposed to the DP-REQ-xxxxx
+  // Ref used as this cache's dictionary key) — this tab never needed
+  // either as a FIELD before, since every read of assignmentCache[ref] is
+  // already inside a context that has `ref` in scope, and refCode is only
+  // ever used transiently (Drive search, history modal) via
+  // renderAssignCell's own parameter. But a live patch shipped out to the
+  // side panel (see broadcastLivePatch below) needs to be a fully
+  // self-describing object, since the side panel has no DOM of its own to
+  // read either value from — hence this small side-table, populated once
+  // per row at cell-creation time (see renderAssignCell), purely so
+  // broadcastLivePatch can stitch a complete record together on the way
+  // out without needing every one of the ~10 assignmentCache construction
+  // sites to also carry fields they have no other use for.
+  let refCodeByRef = {};
 
   // ── Instant cross-surface sync ───────────────────────────────────────────
   // The direct-communication half of CRM ↔ side panel sync, independent of
@@ -261,9 +276,17 @@
   function broadcastLivePatch(ref) {
     if (!ref) return;
     try {
+      const entry = assignmentCache[ref];
+      // ref + listingRef stitched in here, not stored in assignmentCache
+      // itself — see refCodeByRef's own comment above for why. Everything
+      // else on entry (editor, status, title, crmStatus, etc.) already
+      // carries across as-is.
+      const patch = entry
+        ? { ...entry, ref, listingRef: refCodeByRef[ref] || entry.listingRef || "" }
+        : null;
       chrome.runtime.sendMessage({
         type: "DP_LIVE_PATCH", ref,
-        patch: assignmentCache[ref] || null,
+        patch,
         downloaded: !!downloadedCache[ref],
         ts: Date.now(),
       });
@@ -788,6 +811,10 @@
     const cell = document.createElement("div");
     cell.className = "table-cell dp-assign-cell";
     cell.dataset.dpRef = ref || "";
+    // See refCodeByRef's own comment (near assignmentCache's declaration)
+    // for why this gets cached here rather than folded into
+    // assignmentCache itself.
+    if (ref) refCodeByRef[ref] = refCode || "";
 
     const labelEl = document.createElement("label");
     labelEl.textContent = "Assignment";
@@ -2235,9 +2262,42 @@
         // can never win that race and revert something still legitimately
         // in flight.
         const LOCAL_CHANGE_COOLDOWN_MS = 50000;
+        // Past the normal cooldown, a Ref that's still locally protected
+        // (an active Assigned/In Progress/On Hold entry — typically from
+        // Auto-Assign, which can process a large batch faster than Apps
+        // Script's own write lock can keep up under concurrent writes —
+        // see the "Auto-Assign reliability" requirements doc) should
+        // still not be handed back to a fresh row that doesn't actually
+        // look like a completed write. isTrustworthyFreshRow is the one
+        // signal that reliably tells the two apart: a genuinely-unassigned
+        // row never had anyone claim it, so an empty editor is normal and
+        // expected there; an assigned-ish row missing its editor is
+        // exactly the shape of a write that hasn't finished landing yet
+        // (or landed only partially) — not a confirmed alternate truth.
+        // Absence of the row entirely reads the same way: Apps Script
+        // hasn't written anything at all yet, which says nothing about
+        // whether the CRM-side assignment actually happened.
+        //
+        // This is deliberately NOT a second, longer timeout — there is no
+        // reliable point at which "no trustworthy row yet" can be
+        // safely reinterpreted as "confirmed unassigned." The only thing
+        // that's ever allowed to actually revert a protected Ref back to
+        // Unassigned is a genuine, confirmed write failure — see
+        // verifyBeforeReverting, called from assign() itself when its own
+        // write's response comes back not-ok. This merge only ever
+        // decides what to DISPLAY while that resolves; it never decides
+        // that an assignment failed.
+        function isTrustworthyFreshRow(fresh) {
+          if (!fresh || !fresh.status) return false;
+          if (fresh.status === "Unassigned") return true; // legitimately editor-less by design
+          return !!fresh.editor;
+        }
         allRefs.forEach(ref => {
           const localAt = lastLocalChangeAt[ref] || 0;
-          if (Date.now() - localAt < LOCAL_CHANGE_COOLDOWN_MS) {
+          const withinCooldown = Date.now() - localAt < LOCAL_CHANGE_COOLDOWN_MS;
+          const locallyActive = assignmentCache[ref] && isActiveStatus(assignmentCache[ref].status);
+          const protectedFromFresh = withinCooldown || (locallyActive && !isTrustworthyFreshRow(freshAssign[ref]));
+          if (protectedFromFresh) {
             if (assignmentCache[ref]) mergedAssign[ref] = assignmentCache[ref];
             if (downloadedCache[ref]) mergedDownloaded[ref] = true;
           } else {

@@ -230,6 +230,12 @@ const CHANGELOG = [
       { version: 87, notes: [
     "Auto-assign and Auto-Refresh CRM are now scoped per Chrome window instead of shared across the whole browser \u2014 turning either one on or off in one window's side panel no longer touches any other window's automation, including one parked on a different macOS Space. Each window elects its own \u201cfirst CRM tab\u201d independently for auto-assign, and gets its own independent refresh schedule for Auto-Refresh CRM, so two windows can run completely different automation states at the same time without interfering with each other. A window's automation settings are also now cleaned up automatically once that window is closed.",
   ]},
+      { version: 88, notes: [
+    "Fixed new assignments (from Auto Assign, manual assign on the CRM, or a reassign) sometimes showing up in the side panel as \u201c(no listing ref)\u201d instead of the actual reference, for a little while until the next full sync corrected it. The instant CRM \u2192 side panel push introduced in v86 was shipping an incomplete record for a brand-new card; it now carries the listing's reference from the moment the card first appears, same as everything else about that push.",
+  ]},
+      { version: 89, notes: [
+    "Auto-Assign is now much more resilient during large batches (20+ fresh listings at once). Previously, if Apps Script's write for one assignment hadn't landed \u2014 or landed with an empty Assignee \u2014 by the time the next poll came back roughly a minute later, that poll's incomplete data could get treated as truth and the listing could become eligible to be auto-assigned a second time. A locally-claimed listing now stays protected until a genuinely complete, confirmed record shows up for it \u2014 not just after a fixed wait \u2014 so an ambiguous or still-in-flight backend response can no longer cause a duplicate assignment. Nothing reverts a claimed listing back to unassigned except an explicit, confirmed write failure.",
+  ]},
 ];
 
 const card = document.getElementById("card");
