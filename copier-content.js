@@ -44,6 +44,7 @@ function setHookEnabled(val) {
   /* =======================
      PAGE GUARD
   ======================= */
+  // Duplicated in quick-copy-content.js — keep both in sync if this changes.
   function isSingleRequestPage() {
     const hashMatch = /^#Request#.+/.test(location.hash);
     const panelOpen = !!document.querySelector("button.preview-close-button");
@@ -104,6 +105,7 @@ function setHookEnabled(val) {
   /* =======================
      DATA HELPERS
   ======================= */
+  // Duplicated in quick-copy-content.js — keep both in sync if this changes.
   function getScopedContainer() {
     return (
       document.querySelector(".listing-detail, main, #app, .request-detail") ||
@@ -112,6 +114,7 @@ function setHookEnabled(val) {
   }
 
   // ⚠️ CRITICAL — do NOT modify these regex patterns
+  // Duplicated in quick-copy-content.js — keep both in sync if this regex changes.
   function getExactText(regex) {
     const container = getScopedContainer();
     return (

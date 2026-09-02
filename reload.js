@@ -249,6 +249,9 @@ const CHANGELOG = [
       { version: 93, notes: [
     "Reverted v92: Complete and Reject clipboard copies include the DP-REQ number again (DP-REQ | Ref | Locations | Unit/Plot), and the standalone \u201cListing Info\u201d button no longer does (back to Ref_Locations_Unit/Plot).",
   ]},
+      { version: 94, notes: [
+    "Added two new \u201cCopy\u201d / \u201cCopy Location\u201d buttons directly in a single listing's own action toolbar, alongside the existing floating buttons \u2014 same clipboard info, just a second, more convenient place to trigger it from.",
+  ]},
 ];
 
 const card = document.getElementById("card");
