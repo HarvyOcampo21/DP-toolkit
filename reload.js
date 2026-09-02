@@ -246,6 +246,9 @@ const CHANGELOG = [
       { version: 92, notes: [
     "The DP-REQ number copied to clipboard on Complete and on submitting the Reject modal has been removed \u2014 both now copy just Ref | Locations | Unit/Plot, matching each other exactly. The standalone \u201cListing Info\u201d button now includes the DP-REQ number instead, as the first part of the copied text (DP-REQ_Ref_Locations_Unit/Plot).",
   ]},
+      { version: 93, notes: [
+    "Reverted v92: Complete and Reject clipboard copies include the DP-REQ number again (DP-REQ | Ref | Locations | Unit/Plot), and the standalone \u201cListing Info\u201d button no longer does (back to Ref_Locations_Unit/Plot).",
+  ]},
 ];
 
 const card = document.getElementById("card");
