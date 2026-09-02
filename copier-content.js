@@ -493,6 +493,7 @@ function setHookEnabled(val) {
   ======================= */
   function copyListingInfo() {
     const result = [
+      getExactText(/^DP-REQ-\d+/),
       getExactText(/^(DP|CBB|DPA)-(S|R)-\d+/), // ⚠️ critical — do not modify
       getAllLocations(),
       getUnitPlotNumber(),
@@ -1283,7 +1284,6 @@ function setHookEnabled(val) {
 
         // Always copy listing info to clipboard on Complete
         const listingInfo = [
-          getExactText(/^DP-REQ-\d+/),
           getExactText(/^(DP|CBB|DPA)-(S|R)-\d+/),
           getAllLocations(),
           getUnitPlotNumber(),
@@ -1347,7 +1347,6 @@ function setHookEnabled(val) {
 
       // Copy listing info to clipboard, same as Complete
       const listingInfo = [
-        getExactText(/^DP-REQ-\d+/),
         getExactText(/^(DP|CBB|DPA)-(S|R)-\d+/),
         getAllLocations(),
         getUnitPlotNumber(),

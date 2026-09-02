@@ -243,6 +243,9 @@ const CHANGELOG = [
       { version: 91, notes: [
     "Fixed Quick Report and Today's Activity showing different totals than the CRM's Assignment Dashboard for the same day. Both side panel views now count Completed/Pending/On Hold/Rejected the same way the Dashboard does \u2014 based on when a listing was assigned or reassigned, not when it was completed or rejected. A listing assigned yesterday and completed today will no longer show up in today's totals here; it now counts toward whichever day it was assigned, matching the Dashboard.",
   ]},
+      { version: 92, notes: [
+    "The DP-REQ number copied to clipboard on Complete and on submitting the Reject modal has been removed \u2014 both now copy just Ref | Locations | Unit/Plot, matching each other exactly. The standalone \u201cListing Info\u201d button now includes the DP-REQ number instead, as the first part of the copied text (DP-REQ_Ref_Locations_Unit/Plot).",
+  ]},
 ];
 
 const card = document.getElementById("card");
