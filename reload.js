@@ -240,6 +240,9 @@ const CHANGELOG = [
     "Side panel redesign: added the current date/time and a collapsible \u201cQuick Report\u201d (today only, every editor, Completed/Pending/On Hold/Rejected/Total) above Active Assignments, with an animated arrow to show/hide it \u2014 its expanded/collapsed state is remembered and never gets disturbed by polling, Force Sync, or a live update coming in.",
     "Removed the large full-width Settings button to give Active Assignments more room. Settings is now a compact button in the footer, between the connection status and the version number. Force Sync moved inside Settings (same functionality, same button, just relocated) instead of sitting in the footer on its own.",
   ]},
+      { version: 91, notes: [
+    "Fixed Quick Report and Today's Activity showing different totals than the CRM's Assignment Dashboard for the same day. Both side panel views now count Completed/Pending/On Hold/Rejected the same way the Dashboard does \u2014 based on when a listing was assigned or reassigned, not when it was completed or rejected. A listing assigned yesterday and completed today will no longer show up in today's totals here; it now counts toward whichever day it was assigned, matching the Dashboard.",
+  ]},
 ];
 
 const card = document.getElementById("card");

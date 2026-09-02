@@ -283,12 +283,16 @@ let lastLocalChangeAt = {};
 const LOCAL_CHANGE_COOLDOWN_MS = 50000; // matches assigner-content.js — comfortably longer than DP_VERIFY_MAX_ATTEMPTS × DP_VERIFY_RETRY_DELAY_MS (the ~45s verify-before-revert window, defined further down), so a poll can never win that race
 
 // ── Today's activity stats (Completed / Rejected / Total) ────────────────
-// Read straight from each of the CURRENT USER's assignments' own history
-// log (the same a.history used by the per-card timeline) — count any
-// "completed"/"rejected" event whose timestamp falls on today's calendar
-// date. Nothing to reset at midnight: since it's always computed fresh off
-// real timestamps rather than an incrementing counter, it naturally only
-// ever reflects "today" the moment the clock rolls over.
+// Scoped the same way the Assignment Dashboard's "Today" view scopes every
+// status bucket (computeDashboardStats in assigner-content.js, the source
+// of truth here): by the row's own effective assignment date (reassignedAt
+// || assignedAt), then bucketed by whatever the row's CURRENT status is —
+// not by scanning history for a completed/rejected event timestamped today.
+// A same-day resolution on a listing assigned earlier therefore does NOT
+// show up here; it counts toward whichever day it was assigned, matching
+// the Dashboard. Nothing to reset at midnight: since it's always computed
+// fresh off real timestamps rather than an incrementing counter, it
+// naturally only ever reflects "today" the moment the clock rolls over.
 let currentTodayStats = { completed: 0, rejected: 0, total: 0 };
 
 function isToday(iso) {
@@ -305,12 +309,10 @@ function computeTodayStats(fullAssignments, name) {
   let completed = 0, rejected = 0;
   fullAssignments.forEach(a => {
     if (a.editor !== name) return;
-    const historyLog = Array.isArray(a.history) ? a.history : [];
-    historyLog.forEach(e => {
-      if (!e || !e.ts) return;
-      if (e.type === "completed" && isToday(e.ts)) completed++;
-      if (e.type === "rejected"  && isToday(e.ts)) rejected++;
-    });
+    const effectiveAt = a.reassignedAt || a.assignedAt;
+    if (!effectiveAt || !isToday(effectiveAt)) return;
+    if (a.status === "Completed") completed++;
+    else if (a.status === "Rejected") rejected++;
   });
   return { completed, rejected, total: completed + rejected };
 }
@@ -355,18 +357,18 @@ function stopDateTimeClock() {
 // Never writes or otherwise touches assignment state — this only ever
 // summarizes what's already true elsewhere.
 //
-// Completed/Rejected are counted the same way Today's Activity already
-// does (see computeTodayStats): off each row's own history log, so a
-// restarted/reshot listing still correctly attributes whichever cycle's
-// event actually happened today.
-//
-// Pending/On Hold are also scoped to today: an assignment only counts if
-// it was actually assigned/reassigned today (same effectiveAt = reassignedAt
-// || assignedAt pattern getAutoAssignRecommendation already uses further
-// down). A listing that's simply still sitting open from a previous day
-// must NOT pull its editor into today's report just because it's still
-// technically "theirs" — see the "Quick Report Must Be Strictly Today"
-// requirements doc. This also means perEditor only ever gets an entry via
+// Every bucket — Completed, Rejected, Pending, On Hold — is scoped the
+// same way the Assignment Dashboard's "Today" view scopes them
+// (computeDashboardStats in assigner-content.js, the source of truth):
+// an assignment only counts if it was actually assigned/reassigned today
+// (effectiveAt = reassignedAt || assignedAt, same pattern
+// getAutoAssignRecommendation already uses further down), then bucketed
+// by whatever the row's CURRENT status is. A listing that's simply still
+// sitting open from a previous day must NOT pull its editor into today's
+// report just because it's still technically "theirs". This also means a
+// same-day Completed/Rejected resolution on a listing assigned earlier
+// does NOT show up here — it counts toward whichever day it was assigned,
+// consistent with the Dashboard. perEditor only ever gets an entry via
 // bump(), so a row simply won't exist for an editor with zero today
 // activity — no separate empty-row filter needed.
 function computeQuickReport(allAssignments) {
@@ -378,17 +380,12 @@ function computeQuickReport(allAssignments) {
   }
   (allAssignments || []).forEach(a => {
     if (!a || !a.editor) return;
-    const historyLog = Array.isArray(a.history) ? a.history : [];
-    historyLog.forEach(e => {
-      if (!e || !e.ts) return;
-      if (e.type === "completed" && isToday(e.ts)) bump(a.editor, "completed");
-      if (e.type === "rejected"  && isToday(e.ts)) bump(a.editor, "rejected");
-    });
     const effectiveAt = a.reassignedAt || a.assignedAt;
-    if (effectiveAt && isToday(effectiveAt)) {
-      if (a.status === "On Hold") bump(a.editor, "onHold");
-      else if (a.status === "Assigned" || a.status === "In Progress") bump(a.editor, "pending");
-    }
+    if (!effectiveAt || !isToday(effectiveAt)) return;
+    if (a.status === "Completed") bump(a.editor, "completed");
+    else if (a.status === "Rejected") bump(a.editor, "rejected");
+    else if (a.status === "On Hold") bump(a.editor, "onHold");
+    else if (a.status === "Assigned" || a.status === "In Progress") bump(a.editor, "pending");
   });
 
   const rows = Object.keys(perEditor).sort().map(editor => {
