@@ -259,6 +259,10 @@ const CHANGELOG = [
       { version: 96, notes: [
     "The Complete and Reject buttons in the Photo Assignment card now show up on every listing, not just ones missing a native Complete/Reject action \u2014 they're quick actions now, not a fallback for a specific listing type. They still disappear once a listing is already marked Completed/Rejected.",
   ]},
+      { version: 97, notes: [
+    "Restarting a Completed or Rejected listing now asks which category it's being restarted into first, and puts it back as Unassigned \u2014 open for anyone to pick up \u2014 instead of automatically reassigning it straight back to the same editor. Cancelling the prompt leaves everything unchanged.",
+    "The Time History on a restarted listing now shows one continuous timeline covering every cycle it's been through, instead of resetting each time it's restarted.",
+  ]},
 ];
 
 const card = document.getElementById("card");

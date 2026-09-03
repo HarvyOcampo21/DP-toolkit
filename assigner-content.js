@@ -237,6 +237,19 @@
 
   let assignmentCache = {};
   let downloadedCache = {};
+  // Every raw row DP_GET_ALL returned for a given Ref, not just the
+  // collapsed "current cycle" row assignmentCache keeps — restart/reopen
+  // append a brand-new row per cycle rather than editing in place (see
+  // restartCompleted/restartRejected/reopenOnCategoryChange in the Apps
+  // Script), so a Ref that's been reworked has more than one row here.
+  // Used only to reconstruct the full multi-cycle timeline in the History
+  // modal (mergedHistoryForRef) — nothing else should read this; every
+  // other feature in this file should keep using assignmentCache, which is
+  // what "the current state of this Ref" actually means. Rebuilt fresh on
+  // every DP_GET_ALL round-trip, same as assignmentCache, but with no
+  // merge/cooldown logic of its own: it's read-only display data, not
+  // something that gets optimistically written to and reverted.
+  let rowsByRef = {};
   let lastLocalChangeAt = {};
   let refreshInFlight = false;
   // assignmentCache's entries never store their own Ref or the listing's
@@ -1451,50 +1464,60 @@
     // whatever the server says the LATEST row for this ref now looks like
     // (verifyBeforeReverting already always checks the last-appended row
     // per ref, which is exactly the new row this creates).
+    //
+    // Prompts for a category first (showRestartCategoryModal) — the new
+    // row goes to Unassigned, open for anyone to pick up, same as the
+    // automatic reopen path, not straight back to the same editor. The
+    // prior-editor check below is just a local sanity gate matching the
+    // server's own guard (there has to have been *some* editor on file for
+    // this to be a legitimate restart) — it doesn't mean the new row is
+    // going back to them.
     function restartRejected() {
       if (!ref) return;
       if (!window.dpRequireName()) return;
       const previousEntry = assignmentCache[ref] || null;
-      const editorToRestartTo = previousEntry && previousEntry.editor;
-      if (!editorToRestartTo) {
-        console.log("DP restart: no prior editor on file for", ref, "— nothing to restart to");
+      if (!(previousEntry && previousEntry.editor)) {
+        console.log("DP restart: no prior editor on file for", ref, "— nothing to restart");
         return;
       }
-      preserveScrollAround(() => {
-        const now = new Date().toISOString();
-        assignmentCache[ref] = {
-          ...previousEntry, editor: editorToRestartTo, status: "Assigned",
-          assignedAt: now, assignedBy: `Restarted (${MY_NAME})`,
-          startedAt: "", completedAt: "", rejectedAt: "",
-          onHoldAt: "", onHoldReason: "", downloadedAt: "",
-        };
-        delete downloadedCache[ref];
-        markLocalChange(ref);
-        cell.dataset.dpAppliedEditor = editorToRestartTo;
-        cell.dataset.dpAppliedStatus = "Assigned";
-        renderAssigned(editorToRestartTo, "Assigned");
-        applyFilters();
 
-        safeSendMessage({ type: "DP_RESTART_REJECTED", ref, title, actionBy: MY_NAME }, resp => {
-          if (!(resp && resp.ok && resp.data && resp.data.restarted)) {
-            console.log("DP restart failed", resp);
-            verifyBeforeReverting(ref, m => m.status === "Assigned" && m.editor === editorToRestartTo, () => {
-              if (previousEntry) {
-                assignmentCache[ref] = previousEntry;
-                cell.dataset.dpAppliedEditor = previousEntry.editor || "";
-                cell.dataset.dpAppliedStatus = previousEntry.status || "";
-                if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
-                else renderUnassigned();
-              } else {
-                delete assignmentCache[ref];
-                cell.dataset.dpAppliedEditor = "";
-                cell.dataset.dpAppliedStatus = "";
-                renderUnassigned();
-              }
-              markLocalChange(ref);
-              applyFilters();
-            }, "Could not restart this listing — reverted.");
-          }
+      showRestartCategoryModal(newCategory => {
+        preserveScrollAround(() => {
+          const now = new Date().toISOString();
+          assignmentCache[ref] = {
+            ...previousEntry, editor: "", status: "Unassigned", crmStatus: newCategory,
+            assignedAt: "", assignedBy: "",
+            startedAt: "", completedAt: "", rejectedAt: "",
+            onHoldAt: "", onHoldReason: "", downloadedAt: "",
+          };
+          delete downloadedCache[ref];
+          markLocalChange(ref);
+          cell.dataset.dpAppliedEditor = "";
+          cell.dataset.dpAppliedStatus = "Unassigned";
+          renderUnassigned();
+          applyFilters();
+
+          safeSendMessage({ type: "DP_RESTART_REJECTED", ref, title, actionBy: MY_NAME, newCategory }, resp => {
+            if (!(resp && resp.ok && resp.data && resp.data.restarted)) {
+              console.log("DP restart failed", resp);
+              verifyBeforeReverting(ref, m => m.status === "Unassigned" && !m.editor, () => {
+                if (previousEntry) {
+                  assignmentCache[ref] = previousEntry;
+                  cell.dataset.dpAppliedEditor = previousEntry.editor || "";
+                  cell.dataset.dpAppliedStatus = previousEntry.status || "";
+                  if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
+                  else renderUnassigned();
+                } else {
+                  delete assignmentCache[ref];
+                  cell.dataset.dpAppliedEditor = "";
+                  cell.dataset.dpAppliedStatus = "";
+                  renderUnassigned();
+                }
+                markLocalChange(ref);
+                applyFilters();
+              }, "Could not restart this listing — reverted.");
+            }
+          });
         });
       });
     }
@@ -1502,56 +1525,56 @@
     // Restart on a Completed listing — always available (see renderAssigned),
     // not gated on the "possible re-shoot" detection. Same shape as
     // restartRejected: a brand-new row server-side (restartCompleted — see
-    // Apps Script) rather than editing the existing one, straight back to
-    // the same editor as Assigned, never In Progress. Category is tagged
-    // "Re-shoot" (matching restartCompleted's server-side behavior) so it's
-    // reflected locally right away instead of waiting on the next poll.
+    // Apps Script) rather than editing the existing one, goes to
+    // Unassigned rather than back to the same editor, tagged with whichever
+    // category was picked in the prompt.
     function restartCompleted() {
       if (!ref) return;
       if (!window.dpRequireName()) return;
       const previousEntry = assignmentCache[ref] || null;
-      const editorToRestartTo = previousEntry && previousEntry.editor;
-      if (!editorToRestartTo) {
-        console.log("DP restart: no prior editor on file for", ref, "— nothing to restart to");
+      if (!(previousEntry && previousEntry.editor)) {
+        console.log("DP restart: no prior editor on file for", ref, "— nothing to restart");
         return;
       }
-      preserveScrollAround(() => {
-        const now = new Date().toISOString();
-        assignmentCache[ref] = {
-          ...previousEntry, editor: editorToRestartTo, status: "Assigned",
-          assignedAt: now, assignedBy: `Restarted (${MY_NAME})`,
-          startedAt: "", completedAt: "", rejectedAt: "",
-          onHoldAt: "", onHoldReason: "", downloadedAt: "",
-          crmStatus: "Re-shoot",
-        };
-        delete downloadedCache[ref];
-        delete cell.dataset.dpCameBack;
-        markLocalChange(ref);
-        cell.dataset.dpAppliedEditor = editorToRestartTo;
-        cell.dataset.dpAppliedStatus = "Assigned";
-        renderAssigned(editorToRestartTo, "Assigned");
-        applyFilters();
 
-        safeSendMessage({ type: "DP_RESTART_COMPLETED", ref, title, actionBy: MY_NAME }, resp => {
-          if (!(resp && resp.ok && resp.data && resp.data.restarted)) {
-            console.log("DP restart (completed) failed", resp);
-            verifyBeforeReverting(ref, m => m.status === "Assigned" && m.editor === editorToRestartTo, () => {
-              if (previousEntry) {
-                assignmentCache[ref] = previousEntry;
-                cell.dataset.dpAppliedEditor = previousEntry.editor || "";
-                cell.dataset.dpAppliedStatus = previousEntry.status || "";
-                if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
-                else renderUnassigned();
-              } else {
-                delete assignmentCache[ref];
-                cell.dataset.dpAppliedEditor = "";
-                cell.dataset.dpAppliedStatus = "";
-                renderUnassigned();
-              }
-              markLocalChange(ref);
-              applyFilters();
-            }, "Could not restart this listing — reverted.");
-          }
+      showRestartCategoryModal(newCategory => {
+        preserveScrollAround(() => {
+          const now = new Date().toISOString();
+          assignmentCache[ref] = {
+            ...previousEntry, editor: "", status: "Unassigned", crmStatus: newCategory,
+            assignedAt: "", assignedBy: "",
+            startedAt: "", completedAt: "", rejectedAt: "",
+            onHoldAt: "", onHoldReason: "", downloadedAt: "",
+          };
+          delete downloadedCache[ref];
+          delete cell.dataset.dpCameBack;
+          markLocalChange(ref);
+          cell.dataset.dpAppliedEditor = "";
+          cell.dataset.dpAppliedStatus = "Unassigned";
+          renderUnassigned();
+          applyFilters();
+
+          safeSendMessage({ type: "DP_RESTART_COMPLETED", ref, title, actionBy: MY_NAME, newCategory }, resp => {
+            if (!(resp && resp.ok && resp.data && resp.data.restarted)) {
+              console.log("DP restart (completed) failed", resp);
+              verifyBeforeReverting(ref, m => m.status === "Unassigned" && !m.editor, () => {
+                if (previousEntry) {
+                  assignmentCache[ref] = previousEntry;
+                  cell.dataset.dpAppliedEditor = previousEntry.editor || "";
+                  cell.dataset.dpAppliedStatus = previousEntry.status || "";
+                  if (isActiveStatus(previousEntry.status)) renderAssigned(previousEntry.editor, previousEntry.status);
+                  else renderUnassigned();
+                } else {
+                  delete assignmentCache[ref];
+                  cell.dataset.dpAppliedEditor = "";
+                  cell.dataset.dpAppliedStatus = "";
+                  renderUnassigned();
+                }
+                markLocalChange(ref);
+                applyFilters();
+              }, "Could not restart this listing — reverted.");
+            }
+          });
         });
       });
     }
@@ -1639,6 +1662,58 @@
       overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
       document.body.appendChild(overlay);
       if (mode === "edit") requestAnimationFrame(() => textarea.focus());
+    }
+
+    // Category-picker modal shown before Restart (Completed or Rejected)
+    // sends anything to the server — same overlay/modal/title/cancel shell
+    // as showOnHoldModal above, just with a list of selectable category
+    // options instead of a textarea, since no existing category-picker
+    // exists elsewhere in this file to reuse. Picking a category fires
+    // onPick immediately and closes the modal; Cancel (or clicking the
+    // backdrop) closes it with no callback at all — no server call, no
+    // local state change either way.
+    function showRestartCategoryModal(onPick) {
+      document.querySelector(".dp-modal-overlay") && document.querySelector(".dp-modal-overlay").remove();
+
+      const overlay = document.createElement("div");
+      overlay.className = "dp-modal-overlay";
+
+      const modal = document.createElement("div");
+      modal.className = "dp-modal";
+      overlay.appendChild(modal);
+
+      const titleEl = document.createElement("h3");
+      titleEl.className = "dp-modal-title";
+      titleEl.textContent = "Restart — pick a category";
+      modal.appendChild(titleEl);
+
+      const optionsEl = document.createElement("div");
+      optionsEl.className = "dp-modal-options";
+      CATEGORY_OPTIONS.forEach(category => {
+        const optBtn = document.createElement("button");
+        optBtn.type = "button";
+        optBtn.className = "dp-modal-option-btn";
+        optBtn.textContent = category;
+        optBtn.addEventListener("click", () => {
+          overlay.remove();
+          onPick(category);
+        });
+        optionsEl.appendChild(optBtn);
+      });
+      modal.appendChild(optionsEl);
+
+      const btnRow = document.createElement("div");
+      btnRow.className = "dp-modal-btns";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "dp-modal-cancel";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", () => overlay.remove());
+      btnRow.appendChild(cancelBtn);
+      modal.appendChild(btnRow);
+
+      overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
+      document.body.appendChild(overlay);
     }
 
     // Unified re-render fn stored on the element — processRows calls this
@@ -2224,6 +2299,12 @@
       refreshInFlight = false;
       if (resp && resp.ok && resp.data && Array.isArray(resp.data.assignments)) {
         const freshAssign = {}, freshDownloaded = {};
+        // Every raw row per Ref, not collapsed to "last wins" — see
+        // rowsByRef's own comment at declaration. Rebuilt fresh every
+        // refresh, unconditionally: this is read-only display data with no
+        // optimistic-write/revert concerns, so none of the merge/cooldown
+        // logic below (which exists specifically for that) applies to it.
+        const freshRowsByRef = {};
         resp.data.assignments.forEach(a => {
           if (!a.ref) return;
           freshAssign[a.ref] = {
@@ -2247,7 +2328,9 @@
             listingRef:     a.listingRef     || "",
           };
           if (a.downloaded) freshDownloaded[a.ref] = true;
+          (freshRowsByRef[a.ref] = freshRowsByRef[a.ref] || []).push(a);
         });
+        rowsByRef = freshRowsByRef;
         const mergedAssign = {}, mergedDownloaded = {};
         const allRefs = new Set([...Object.keys(assignmentCache), ...Object.keys(downloadedCache),
           ...Object.keys(freshAssign), ...Object.keys(freshDownloaded)]);
@@ -3278,6 +3361,39 @@
       " · " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
   }
 
+  // Reconstructs a Ref's full timeline across every row it's ever had.
+  // restart/reopen append a brand-new row per rework cycle rather than
+  // editing the old one in place (restartCompleted/restartRejected/
+  // reopenOnCategoryChange, all in the Apps Script), and as of the
+  // restart-goes-to-Unassigned change each new row's history starts fresh
+  // instead of carrying the old row's forward — so a Ref that's been
+  // reworked has its full story spread across more than one row. This
+  // concatenates every row's own history array and stable-sorts the result
+  // by timestamp, so same-timestamp events (e.g. the "recategorized"
+  // marker written onto the old row and the new row's own opening event,
+  // both stamped in the same request) keep their original row order —
+  // old row's events before the new row's — as a tiebreaker, rather than
+  // being reordered arbitrarily by an unstable sort.
+  //
+  // Returns null (not []) when there's nothing to merge from — either the
+  // Ref isn't in rowsByRef yet (e.g. the History-modal's own network
+  // fallback hasn't populated it) or it has no history at all — so the
+  // caller can tell "nothing to merge, fall back to entry.history" apart
+  // from "merged, and the honest answer is zero events."
+  function mergedHistoryForRef(ref) {
+    const rows = ref && rowsByRef[ref];
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const combined = [];
+    rows.forEach(row => {
+      const h = Array.isArray(row.history) ? row.history : [];
+      h.forEach(e => combined.push(e));
+    });
+    // Array.prototype.sort is stable per spec (ES2019+), so equal-ts
+    // events keep the push order above (row order, then in-row order).
+    combined.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    return combined;
+  }
+
   function showHistoryModal(ref, refCode, title) {
     document.querySelector(".dp-modal-overlay") && document.querySelector(".dp-modal-overlay").remove();
 
@@ -3343,8 +3459,16 @@
       // rejectedAt, etc.), which only ever reflect the CURRENT row and go
       // blank/wrong the moment a listing is reopened into a fresh row
       // (see restartRejected/reopenOnCategoryChange, both of which
-      // deliberately clear those columns on the new row). This is why the
-      // timeline below is built from entry.history as its primary source.
+      // deliberately clear those columns on the new row).
+      //
+      // As of the restart-goes-to-Unassigned change, each row's own
+      // history only holds that row's own cycle — restart/reopen no
+      // longer carry the previous row's history forward (server-side, see
+      // the Apps Script). So a listing that's been reworked has its full
+      // story spread across more than one row sharing this Ref, and the
+      // timeline below is built from mergedHistoryForRef(ref) — every
+      // row's history concatenated and stable-sorted by timestamp — rather
+      // than a single row's entry.history field.
       const TIMELINE_EVENT_META = {
         assigned:           { label: "Assigned",        color: "#e6941a", dot: "assigned" },
         reassigned:         { label: "Reassigned",       color: "#f472b6", dot: "reassigned" },
@@ -3373,7 +3497,8 @@
           case "onhold":
             return e.reason ? `Reason: ${e.reason}` : null;
           case "restarted":
-            return [e.reason === "reshoot" ? "Re-shoot" : null, e.by ? `By: ${e.by}` : null]
+            return [e.reason === "reshoot" ? "Re-shoot" : null, e.by ? `By: ${e.by}` : null,
+                    e.previousEditor ? `Previously: ${e.previousEditor}` : null]
               .filter(Boolean).join("  \u00b7  ") || null;
           case "downloaded":
             return e.editor ? `By: ${e.editor}` : null;
@@ -3386,7 +3511,10 @@
         }
       }
 
-      const historyLog = Array.isArray(entry && entry.history) ? entry.history : [];
+      const merged = mergedHistoryForRef(ref);
+      const historyLog = merged && merged.length > 0
+        ? merged
+        : (Array.isArray(entry && entry.history) ? entry.history : []);
 
       let activeEvents;
       if (historyLog.length > 0) {
@@ -3506,10 +3634,16 @@
         return;
       }
 
-      // Last match, not first — same reasoning as the write-verification
-      // fix above: the current cycle's row is always the last one appended
-      // for a given Ref.
-      const match = resp.data.assignments.filter(a => a.ref === ref).pop();
+      // Every matching row for this Ref, not just the last one — needed so
+      // mergedHistoryForRef(ref) (called from inside renderTimeline) has
+      // something to reconstruct the full multi-cycle timeline from, same
+      // as the regular poll already populates rowsByRef with. Last row is
+      // still what's used for assignmentCache below — same reasoning as
+      // the write-verification fix above: the current cycle's row is
+      // always the last one appended for a given Ref.
+      const matchingRows = resp.data.assignments.filter(a => a.ref === ref);
+      if (matchingRows.length > 0) rowsByRef[ref] = matchingRows;
+      const match = matchingRows[matchingRows.length - 1];
       if (match && ref) {
         assignmentCache[ref] = {
           editor:         match.editor         || "",

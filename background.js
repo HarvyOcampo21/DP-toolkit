@@ -548,24 +548,29 @@ function dispatchAssignerMessage(message, sendResponse) {
     return true;
   }
 
-  // Manual "Restart" click on a Rejected listing — see the matching Apps
-  // Script action for how this differs from the automatic reopen above
-  // (this one reassigns straight back to the same editor as Assigned,
-  // rather than leaving it Unassigned for anyone to pick up).
+  // Manual "Restart" click on a Rejected listing — prompts for a category
+  // first client-side (see the content script) and forwards the picked
+  // category through as newCategory. See the matching Apps Script action:
+  // as of the category-prompt change this leaves the new row Unassigned
+  // for anyone to pick up, same as the automatic reopen above, rather than
+  // reassigning straight back to the same editor.
   if (message.type === "DP_RESTART_REJECTED") {
     postToAssignerSheet({ action: "restartRejected", ref: message.ref,
-      title: message.title || "", actionBy: message.actionBy || "" }, sendResponse);
+      title: message.title || "", actionBy: message.actionBy || "",
+      newCategory: message.newCategory || "" }, sendResponse);
     return true;
   }
 
   // Manual "Restart" click on a Completed listing — always available (not
   // gated on the "possible re-shoot" detection; that's UI-only, see the
-  // content script). Same shape as the Rejected restart above: reassigns
-  // straight back to the same editor as Assigned, tagged "Re-shoot" — see
-  // the matching Apps Script action for the full rationale.
+  // content script). Same shape as the Rejected restart above: prompts for
+  // a category first, forwarded as newCategory, and leaves the new row
+  // Unassigned rather than reassigned back to the same editor — see the
+  // matching Apps Script action for the full rationale.
   if (message.type === "DP_RESTART_COMPLETED") {
     postToAssignerSheet({ action: "restartCompleted", ref: message.ref,
-      title: message.title || "", actionBy: message.actionBy || "" }, sendResponse);
+      title: message.title || "", actionBy: message.actionBy || "",
+      newCategory: message.newCategory || "" }, sendResponse);
     return true;
   }
 

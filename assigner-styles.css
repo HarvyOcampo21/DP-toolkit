@@ -147,6 +147,18 @@
 }
 .dp-modal-save:hover { background: #7e57c2; }
 
+/* ── Restart category-picker modal ───────────────────────────────────── */
+.dp-modal-options {
+  display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;
+}
+.dp-modal-option-btn {
+  background: #262a38; border: 1px solid #353b4d; color: #e3e6ee;
+  border-radius: 8px; padding: 9px 12px; font-size: 0.88rem;
+  font-weight: 600; text-align: left; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.dp-modal-option-btn:hover { border-color: #9575cd; background: rgba(149,117,205,0.12); }
+
 .dp-badge-status { white-space: nowrap; }
 .dp-badge-editor { background: rgba(19,122,134,0.15); padding: 1px 6px; border-radius: 4px; }
 .dp-unassign-btn {
