@@ -182,17 +182,28 @@
 }
 .dp-start-btn:hover { background: rgba(0,209,178,0.3); }
 
-/* Backup Complete button injected into the side drawer toolbar — that
-   toolbar sits on a light/white background (unlike the dark table), so
-   this gets its own solid-fill treatment. */
+/* Backup Complete / Reject buttons — live inside the "Photo Assignment"
+   card's .dp-assign-widget now (moved out of the toolbar), so they're
+   sized/styled to match the Start/Hold pill buttons they sit beside
+   rather than the toolbar's larger solid-fill buttons they were
+   originally built for. */
 .dp-drawer-complete-btn {
-  background: #00d1b2; border: none; color: #fff;
-  border-radius: 6px; padding: 8px 16px; margin-right: 8px;
-  font-size: 0.85rem; font-weight: 700; cursor: pointer;
-  transition: opacity .15s;
+  background: rgba(0,209,178,0.15); border: 1px solid #00d1b2;
+  color: #00d1b2; border-radius: 6px; padding: 3px 8px;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer; margin-left: 4px;
+  transition: background .15s;
 }
-.dp-drawer-complete-btn:hover { opacity: .85; }
+.dp-drawer-complete-btn:hover { background: rgba(0,209,178,0.3); }
 .dp-drawer-complete-btn:disabled { opacity: .6; cursor: default; }
+
+.dp-drawer-reject-btn {
+  background: rgba(229,57,53,0.15); border: 1px solid #ef9a9a;
+  color: #ef9a9a; border-radius: 6px; padding: 3px 8px;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer; margin-left: 4px;
+  transition: background .15s;
+}
+.dp-drawer-reject-btn:hover { background: rgba(229,57,53,0.3); }
+.dp-drawer-reject-btn:disabled { opacity: .6; cursor: default; }
 
 /* Editor picker popover */
 .dp-editor-popover {

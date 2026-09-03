@@ -688,7 +688,13 @@
     processTimer = setTimeout(guarded(() => {
       processRows();
       ensureFilterBar();
+      // Must run before ensureDrawerCompleteButton/ensureDrawerRejectButton
+      // now that both target the card those build, not the toolbar —
+      // otherwise the backup buttons wouldn't appear until the next
+      // setInterval tick further down.
+      ensureDrawerAssignCard();
       ensureDrawerCompleteButton();
+      ensureDrawerRejectButton();
     }), inBurst ? BURST_DEBOUNCE_MS : PROCESS_DEBOUNCE_MS);
   }
 
@@ -3559,6 +3565,19 @@
     return false;
   }
 
+  // Same shape as hasNativeCompleteButton — checks the toolbar for the
+  // CRM's own Reject action, used to decide whether the backup Reject
+  // button is needed at all.
+  function hasNativeRejectButton(actionsEl) {
+    const buttons = actionsEl.querySelectorAll("button.custom-dropdown-trigger.are-action.is-wide");
+    for (const btn of buttons) {
+      const span = btn.querySelector("span");
+      const text = span && span.textContent.trim();
+      if (text === "Reject") return true;
+    }
+    return false;
+  }
+
   function completeFromDrawer(ref, btn) {
     if (!window.dpRequireName()) return;
     const previousEntry = assignmentCache[ref] || null;
@@ -3597,14 +3616,69 @@
     });
   }
 
+  // Same shape as completeFromDrawer — marks Rejected instead of Completed.
+  // No reason prompt: the native Reject-modal interceptor further down
+  // doesn't forward a reason to the sheet either (just ref/editor/title),
+  // so there's nothing here that would actually get used downstream.
+  function rejectFromDrawer(ref, btn) {
+    if (!window.dpRequireName()) return;
+    const previousEntry = assignmentCache[ref] || null;
+    const editor = previousEntry ? previousEntry.editor || "" : "";
+    const title  = previousEntry ? previousEntry.title  || "" : "";
+    assignmentCache[ref] = { ...(previousEntry || {}), editor, status: "Rejected", title };
+    markLocalChange(ref);
+    document.querySelectorAll(".dp-assign-cell").forEach(c => {
+      if (c.dataset.dpRef === ref) {
+        c.dataset.dpAppliedStatus = "Rejected";
+        c.__dpRenderStatus && c.__dpRenderStatus();
+      }
+    });
+    btn.disabled = true;
+    btn.textContent = "Rejecting…";
+    safeSendMessage({ type: "DP_MARK_REJECTED", ref, editor, title }, resp => {
+      if (resp && resp.ok) {
+        btn.textContent = "Rejected \u2713";
+      } else {
+        console.log("DP drawer markRejected failed", resp);
+        verifyBeforeReverting(ref, "Rejected", () => {
+          if (previousEntry) assignmentCache[ref] = previousEntry;
+          else delete assignmentCache[ref];
+          markLocalChange(ref);
+          document.querySelectorAll(".dp-assign-cell").forEach(c => {
+            if (c.dataset.dpRef === ref) {
+              c.dataset.dpAppliedStatus = previousEntry ? previousEntry.status || "" : "";
+              c.__dpRenderStatus && c.__dpRenderStatus();
+            }
+          });
+          btn.disabled = false;
+          btn.textContent = "Reject";
+        }, "Could not mark Rejected — try again.");
+      }
+    });
+  }
+
+  // Backup Complete button — lives in the "Photo Assignment" card (built by
+  // ensureDrawerAssignCard, which must run first each tick), appended into
+  // the same .dp-assign-widget row as Start/Hold rather than as a new row.
+  // Not added inside renderAssignCell itself: that function is shared
+  // verbatim with the list-row widgets, so anything appended there would
+  // also show up on every row, not just the drawer. The native-button
+  // check still reads the toolbar — that's where the CRM's real
+  // Complete/Approve action actually lives, regardless of where our
+  // backup is displayed.
   function ensureDrawerCompleteButton() {
     const toolbar = document.querySelector(".side-drawer-body-head .preview-toolbar");
     if (!toolbar) return;
     const actions = toolbar.querySelector(".preview-actions");
     if (!actions) return;
 
+    const card = document.getElementById("dp-drawer-assign-card");
+    if (!card) return;
+    const widget = card.querySelector(".dp-assign-widget");
+    if (!widget) return;
+
     const ref = extractDetailPageRef();
-    let existingOurs = actions.querySelector("#dp-drawer-complete-btn");
+    let existingOurs = widget.querySelector("#dp-drawer-complete-btn");
 
     // Drawer switched to a different listing without a full DOM remount —
     // drop the stale button so it gets re-evaluated for the new listing.
@@ -3636,9 +3710,53 @@
       completeFromDrawer(ref, btn);
     }));
 
-    const closeBtn = actions.querySelector(".preview-close-button");
-    if (closeBtn) actions.insertBefore(btn, closeBtn);
-    else actions.appendChild(btn);
+    widget.appendChild(btn);
+  }
+
+  // Same pattern as ensureDrawerCompleteButton, mirrored for Reject.
+  function ensureDrawerRejectButton() {
+    const toolbar = document.querySelector(".side-drawer-body-head .preview-toolbar");
+    if (!toolbar) return;
+    const actions = toolbar.querySelector(".preview-actions");
+    if (!actions) return;
+
+    const card = document.getElementById("dp-drawer-assign-card");
+    if (!card) return;
+    const widget = card.querySelector(".dp-assign-widget");
+    if (!widget) return;
+
+    const ref = extractDetailPageRef();
+    let existingOurs = widget.querySelector("#dp-drawer-reject-btn");
+
+    if (existingOurs && existingOurs.dataset.dpRef !== ref) {
+      existingOurs.remove();
+      existingOurs = null;
+    }
+
+    if (hasNativeRejectButton(actions)) {
+      if (existingOurs) existingOurs.remove();
+      return;
+    }
+    if (existingOurs || !ref) return;
+
+    // Already rejected in our records — no need to offer it again.
+    const cached = assignmentCache[ref];
+    if (cached && cached.status === "Rejected") return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "dp-drawer-reject-btn";
+    btn.className = "dp-drawer-reject-btn";
+    btn.dataset.dpRef = ref;
+    btn.textContent = "Reject";
+    btn.title = "No native Reject action found on this listing — manually mark it Rejected";
+    btn.addEventListener("click", guarded(e => {
+      e.stopPropagation();
+      e.preventDefault();
+      rejectFromDrawer(ref, btn);
+    }));
+
+    widget.appendChild(btn);
   }
 
   // ── Assignment card injected into the side drawer's right sidebar ────────
@@ -3905,8 +4023,9 @@
   // cell is cheap and self-heals within ~800ms regardless of what caused
   // the wipe.
   setInterval(guarded(() => {
-    ensureDrawerCompleteButton();
     ensureDrawerAssignCard();
+    ensureDrawerCompleteButton();
+    ensureDrawerRejectButton();
     document.querySelectorAll(".dp-assign-cell").forEach(c => {
       c.__dpReassertVisuals && c.__dpReassertVisuals();
     });

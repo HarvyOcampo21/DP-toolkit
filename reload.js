@@ -252,6 +252,10 @@ const CHANGELOG = [
       { version: 94, notes: [
     "Added two new \u201cCopy\u201d / \u201cCopy Location\u201d buttons directly in a single listing's own action toolbar, alongside the existing floating buttons \u2014 same clipboard info, just a second, more convenient place to trigger it from.",
   ]},
+      { version: 95, notes: [
+    "Moved the backup \u201cComplete\u201d button (only shown when a listing has no native Complete/Approve action, e.g. reshoots) out of the drawer's top toolbar and into the Photo Assignment card, next to Start/Hold, so it reads as one more assignment action instead of a separate control.",
+    "Added a matching backup \u201cReject\u201d button in the same card, for listings that don't have a native Reject action either \u2014 same rules as backup Complete: only appears when needed, disappears once the listing is already marked Rejected.",
+  ]},
 ];
 
 const card = document.getElementById("card");
