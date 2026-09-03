@@ -3548,36 +3548,13 @@
     return span && span.textContent.trim() === "Complete" ? btn : null;
   }
 
-  // ── Backup Complete button injected into the side drawer ─────────────────
-  // Some listings never get the CRM's own "Complete" dropdown action inside
-  // the detail drawer (e.g. a reshoot that only replaces photos). Rather
-  // than always showing our own Complete button, we check the open drawer
-  // for the native one first — if it's there, the click hook below already
-  // handles it and we do nothing. Only if it's genuinely missing do we
-  // inject our own button in the same toolbar spot.
-  function hasNativeCompleteButton(actionsEl) {
-    const buttons = actionsEl.querySelectorAll("button.custom-dropdown-trigger.are-action.is-wide");
-    for (const btn of buttons) {
-      const span = btn.querySelector("span");
-      const text = span && span.textContent.trim();
-      if (text === "Complete" || text === "Approve") return true;
-    }
-    return false;
-  }
-
-  // Same shape as hasNativeCompleteButton — checks the toolbar for the
-  // CRM's own Reject action, used to decide whether the backup Reject
-  // button is needed at all.
-  function hasNativeRejectButton(actionsEl) {
-    const buttons = actionsEl.querySelectorAll("button.custom-dropdown-trigger.are-action.is-wide");
-    for (const btn of buttons) {
-      const span = btn.querySelector("span");
-      const text = span && span.textContent.trim();
-      if (text === "Reject") return true;
-    }
-    return false;
-  }
-
+  // ── Backup Complete / Reject quick actions in the side drawer ────────────
+  // Always-present quick actions in the Photo Assignment card, independent
+  // of whatever the CRM's own toolbar does or doesn't offer for a given
+  // listing — not conditional fallbacks for when a native action is
+  // missing (that was the original behavior; dropped as of v96, since a
+  // fixed always-on control sitting next to Start/Hold is simpler for
+  // editors than one that appears/disappears based on listing type).
   function completeFromDrawer(ref, btn) {
     if (!window.dpRequireName()) return;
     const previousEntry = assignmentCache[ref] || null;
@@ -3662,16 +3639,9 @@
   // the same .dp-assign-widget row as Start/Hold rather than as a new row.
   // Not added inside renderAssignCell itself: that function is shared
   // verbatim with the list-row widgets, so anything appended there would
-  // also show up on every row, not just the drawer. The native-button
-  // check still reads the toolbar — that's where the CRM's real
-  // Complete/Approve action actually lives, regardless of where our
-  // backup is displayed.
+  // also show up on every row, not just the drawer. Renders on every
+  // listing now (see the header comment above) — no native-button check.
   function ensureDrawerCompleteButton() {
-    const toolbar = document.querySelector(".side-drawer-body-head .preview-toolbar");
-    if (!toolbar) return;
-    const actions = toolbar.querySelector(".preview-actions");
-    if (!actions) return;
-
     const card = document.getElementById("dp-drawer-assign-card");
     if (!card) return;
     const widget = card.querySelector(".dp-assign-widget");
@@ -3687,10 +3657,6 @@
       existingOurs = null;
     }
 
-    if (hasNativeCompleteButton(actions)) {
-      if (existingOurs) existingOurs.remove();
-      return;
-    }
     if (existingOurs || !ref) return;
 
     // Already completed in our records — no need to offer it again.
@@ -3703,7 +3669,7 @@
     btn.className = "dp-drawer-complete-btn";
     btn.dataset.dpRef = ref;
     btn.textContent = "Complete";
-    btn.title = "No native Complete action found on this listing (e.g. reshoots) — manually mark it Completed";
+    btn.title = "Mark this listing Completed";
     btn.addEventListener("click", guarded(e => {
       e.stopPropagation();
       e.preventDefault();
@@ -3715,11 +3681,6 @@
 
   // Same pattern as ensureDrawerCompleteButton, mirrored for Reject.
   function ensureDrawerRejectButton() {
-    const toolbar = document.querySelector(".side-drawer-body-head .preview-toolbar");
-    if (!toolbar) return;
-    const actions = toolbar.querySelector(".preview-actions");
-    if (!actions) return;
-
     const card = document.getElementById("dp-drawer-assign-card");
     if (!card) return;
     const widget = card.querySelector(".dp-assign-widget");
@@ -3733,10 +3694,6 @@
       existingOurs = null;
     }
 
-    if (hasNativeRejectButton(actions)) {
-      if (existingOurs) existingOurs.remove();
-      return;
-    }
     if (existingOurs || !ref) return;
 
     // Already rejected in our records — no need to offer it again.
@@ -3749,7 +3706,7 @@
     btn.className = "dp-drawer-reject-btn";
     btn.dataset.dpRef = ref;
     btn.textContent = "Reject";
-    btn.title = "No native Reject action found on this listing — manually mark it Rejected";
+    btn.title = "Mark this listing Rejected";
     btn.addEventListener("click", guarded(e => {
       e.stopPropagation();
       e.preventDefault();

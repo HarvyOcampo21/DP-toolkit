@@ -256,6 +256,9 @@ const CHANGELOG = [
     "Moved the backup \u201cComplete\u201d button (only shown when a listing has no native Complete/Approve action, e.g. reshoots) out of the drawer's top toolbar and into the Photo Assignment card, next to Start/Hold, so it reads as one more assignment action instead of a separate control.",
     "Added a matching backup \u201cReject\u201d button in the same card, for listings that don't have a native Reject action either \u2014 same rules as backup Complete: only appears when needed, disappears once the listing is already marked Rejected.",
   ]},
+      { version: 96, notes: [
+    "The Complete and Reject buttons in the Photo Assignment card now show up on every listing, not just ones missing a native Complete/Reject action \u2014 they're quick actions now, not a fallback for a specific listing type. They still disappear once a listing is already marked Completed/Rejected.",
+  ]},
 ];
 
 const card = document.getElementById("card");
