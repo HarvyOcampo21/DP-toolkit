@@ -1,47 +1,4 @@
 /* =======================
-   BUTTON CONTAINER
-======================= */
-
-#dp-button-container {
-  position: fixed;
-  top: 80px;
-  right: 20px;
-  z-index: 9997;
-
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-#no-ref-btn {
-  border-left: 4px solid #f97316;
-}
-
-#copy-data-btn {
-  border-left: 4px solid #22c55e;
-}
-
-/* =======================
-   HAMBURGER TOGGLE
-======================= */
-#dp-hamburger {
-  border-left: 4px solid #22c55e !important;
-}
-
-.dp-ham-line {
-  display: block;
-  width: 20px;
-  height: 2px;
-  background: #e5e7eb;
-  border-radius: 2px;
-  transition:
-    transform 0.3s ease,
-    opacity 0.2s ease;
-  transform-origin: center;
-  flex-shrink: 0;
-}
-
-/* =======================
    BUTTON BASE STYLE
 ======================= */
 .dp-custom-btn {
@@ -85,24 +42,62 @@ body.dark .dp-custom-btn {
 }
 
 /* =======================
-   OPTIONAL: COLOR VARIANTS
+   COPIER TOOLS CARD (drawer)
 ======================= */
-#copy-listing-btn {
-  border-left: 4px solid #22c55e;
+/* Auto-log toggle row, now inside the "Copier Tools" card instead of
+   floating on its own as an icon-only control — needs a visible label
+   here, and text colors suited to the card's light Bulma background
+   rather than the old panel's own dark one. */
+.dp-copier-autolog-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.dp-copier-autolog-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #363636;
+}
+#dp-hook-toggle .dp-toggle-track {
+  top: -5px;
+  width: 38px;
+  height: 20px;
+  border-radius: 999px;
+  background: #64748b;
+  position: relative;
+  transition: all .25s ease;
+}
+#dp-hook-toggle .dp-toggle-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: all .25s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: 0 2px 6px rgba(0,0,0,.3);
+}
+#dp-hook-toggle.active .dp-toggle-track {
+  background: #23a4e4;
+}
+#dp-hook-toggle.active .dp-toggle-thumb {
+  transform: translateX(18px);
 }
 
-#search-sub-location-btn {
-  border-left: 4px solid #3b82f6;
+/* 6 action buttons, 2 rows × 3 columns. */
+.dp-copier-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
-
-#log-to-sheet-btn {
-  border-left: 4px solid #f59e0b;
-}
-
-#copy-sub-location-btn {
-  border-left: 4px solid #a855f7;
-}
-
-#email-closed-btn {
-  border-left: 4px solid #22d3ee;
+.dp-copier-tools-grid-btn {
+  width: 100%;
+  padding: 8px 6px;
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

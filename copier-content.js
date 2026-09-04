@@ -35,13 +35,6 @@ function setHookEnabled(val) {
   });
 
   /* =======================
-     KEYBOARD SHORTCUT (Alt+C → Copy Listing Info)
-  ======================= */
-  document.addEventListener("keydown", function (e) {
-    if (e.altKey && e.key === "c") copyListingInfo();
-  });
-
-  /* =======================
      PAGE GUARD
   ======================= */
   // Duplicated in quick-copy-content.js — keep both in sync if this changes.
@@ -375,7 +368,7 @@ function setHookEnabled(val) {
      without hovering Complete/Reject first.
 
      SAFETY: the cache is keyed to the exact listing it was warmed on
-     (reqNumber + listingRef), not just a time window. removeButtons()
+     (reqNumber + listingRef), not just a time window. removeCopierToolsCard()
      already clears it on panel close, and hashchange already fires
      between listings — but neither is something this should have to
      depend on to stay correct. If the key on read doesn't match the key
@@ -494,25 +487,6 @@ function setHookEnabled(val) {
   /* =======================
      CORE ACTIONS
   ======================= */
-  function copyListingInfo() {
-    const result = [
-      getExactText(/^(DP|CBB|DPA)-(S|R)-\d+/), // ⚠️ critical — do not modify
-      getAllLocations(),
-      getUnitPlotNumber(),
-    ]
-      .filter(Boolean)
-      .join("_");
-
-    if (!result) {
-      showToast("⚠️ No listing info found on this page.", true);
-      return;
-    }
-
-    navigator.clipboard
-      .writeText(result)
-      .then(() => showToast("✅ Copied:\n" + result));
-  }
-
   function copySecondLocation() {
     const text = getSecondLocationOnly();
     if (!text) {
@@ -1434,214 +1408,155 @@ function setHookEnabled(val) {
   }
 
   /* =======================
-     BUTTONS
+     COPIER TOOLS DRAWER CARD
   ======================= */
-  function createButton(id, text, handler) {
-    if (!isSingleRequestPage() || document.getElementById(id)) return;
-
-    let container = document.getElementById("dp-button-container");
-
-    if (!container) {
-      // Outer wrapper — holds hamburger + collapsible stack
-      const wrapper = document.createElement("div");
-      wrapper.id = "dp-button-wrapper";
-      Object.assign(wrapper.style, {
-        position: "fixed",
-        top: "10px",
-        right: "20px",
-        zIndex: "9997",
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: "8px",
-      });
-
-      const style = document.createElement("style");
-      style.innerHTML = `
-      #dp-hook-toggle .dp-toggle-track {
-        top: -5px;
-        width: 38px;
-        height: 20px;
-        border-radius: 999px;
-        background: #64748b;
-        position: relative;
-        transition: all .25s ease;
-      }
-
-      #dp-hook-toggle .dp-toggle-thumb {
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: white;
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        transition: all .25s cubic-bezier(0.4,0,0.2,1);
-        box-shadow: 0 2px 6px rgba(0,0,0,.3);
-      }
-
-      #dp-hook-toggle.active .dp-toggle-track {
-        background: #23a4e4;
-      }
-
-      #dp-hook-toggle.active .dp-toggle-thumb {
-        transform: translateX(18px);
-      }
-      `;
-      document.head.appendChild(style);
-
-      // Hamburger button
-      const hamburger = document.createElement("button");
-      hamburger.id = "dp-hamburger";
-      hamburger.className = "dp-custom-btn";
-      hamburger.title = "Toggle tools";
-      hamburger.innerHTML = `
-        <span class="dp-ham-line"></span>
-        <span class="dp-ham-line"></span>
-        <span class="dp-ham-line"></span>`;
-      Object.assign(hamburger.style, {
-        width: "44px",
-        height: "44px",
-        padding: "10px",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "5px",
-        marginBottom: "8px",
-        borderLeft: "4px solid #22c55e",
-      });
-
-      // Toggle Switch
-      const toggle = document.createElement("div");
-      toggle.id = "dp-hook-toggle";
-      toggle.innerHTML = `
-        <div class="dp-toggle-track">
-          <div class="dp-toggle-thumb"></div>
-        </div>
-      `;
-
-      Object.assign(toggle.style, {
-        width: "44px",
-        height: "24px",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      });
-
-      function updateToggleUI() {
-          if (isHookEnabled()) {
-            toggle.classList.add("active");
-          } else {
-            toggle.classList.remove("active");
-          }
-        }
-
-        toggle.addEventListener("click", () => {
-          const newState = !isHookEnabled();
-          setHookEnabled(newState);
-          updateToggleUI();
-
-          if (!newState) {
-            _completeHooked = false; // reset hook
-            showToast("⛔ Auto-log OFF");
-          } else {
-            hookCompleteButton();
-            showToast("✅ Auto-log ON");
-          }
-        });
-
-        updateToggleUI();
-
-      // Collapsible button stack
-      container = document.createElement("div");
-      container.id = "dp-button-container";
-      Object.assign(container.style, {
-        display: "flex",
-        flexDirection: "column",
-        gap: "10px",
-        overflow: "hidden",
-        maxHeight: "0px",
-        opacity: "0",
-        transition:
-          "max-height 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.25s ease",
-        transformOrigin: "top right",
-      });
-
-      // Toggle open/close
-      let isOpen = false;
-      hamburger.addEventListener("click", () => {
-        isOpen = !isOpen;
-        if (isOpen) {
-          container.style.maxHeight = "600px";
-          container.style.opacity = "1";
-          animateHamburger(hamburger, true);
-        } else {
-          container.style.maxHeight = "0px";
-          container.style.opacity = "0";
-          animateHamburger(hamburger, false);
-        }
-      });
-
-      wrapper.appendChild(toggle);
-      wrapper.appendChild(hamburger);
-      wrapper.appendChild(container);
-      document.body.appendChild(wrapper);
-    }
-
-    const btn = document.createElement("button");
-    btn.id = id;
-    btn.textContent = text;
-    btn.title = text;
-    btn.onclick = handler;
-    btn.className = "dp-custom-btn";
-    container.appendChild(btn);
+  // Own small equivalents of assigner-content.js's findDrawerSidebarContainer()
+  // and extractDetailPageRef() — copier-content.js runs as a separate content
+  // script with no shared scope, so those can't just be imported. Duplicated
+  // in assigner-content.js — keep both in sync if either of those changes.
+  function findCopierDrawerSidebarContainer() {
+    if (!document.querySelector(".side-drawer-body-head")) return null;
+    return document.querySelector(".sticky-page.is-sticky");
   }
 
-  function animateHamburger(hamburger, open) {
-    const lines = hamburger.querySelectorAll(".dp-ham-line");
-    if (!lines.length) return;
-    if (open) {
+  function extractCopierDetailPageRef() {
+    const el = document.querySelector(".ref-side-drawer-res-design");
+    return el ? el.textContent.trim() : null;
+  }
 
-      lines[0].style.transform = "translateY(7px) rotate(45deg)";
-      lines[1].style.opacity = "0";
-      lines[1].style.transform = "scaleX(0)";
-      lines[2].style.transform = "translateY(-8px) rotate(-45deg)";
+  // Auto-log toggle switch — same markup/CSS classes as the old floating
+  // version (#dp-hook-toggle, .dp-toggle-track/.dp-toggle-thumb — see
+  // copier-styles.css), just wrapped with a visible label now that it
+  // lives in a labeled card instead of floating on its own as an
+  // icon-only control. Returns a row element ready to drop into the card.
+  function buildAutoLogToggle() {
+    const row = document.createElement("div");
+    row.className = "dp-copier-autolog-row";
+
+    const label = document.createElement("span");
+    label.className = "dp-copier-autolog-label";
+    label.textContent = "Auto-log";
+    row.appendChild(label);
+
+    const toggle = document.createElement("div");
+    toggle.id = "dp-hook-toggle";
+    toggle.innerHTML = `
+      <div class="dp-toggle-track">
+        <div class="dp-toggle-thumb"></div>
+      </div>
+    `;
+    Object.assign(toggle.style, {
+      width: "44px",
+      height: "24px",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    });
+
+    function updateToggleUI() {
+      if (isHookEnabled()) toggle.classList.add("active");
+      else toggle.classList.remove("active");
+    }
+
+    toggle.addEventListener("click", () => {
+      const newState = !isHookEnabled();
+      setHookEnabled(newState);
+      updateToggleUI();
+
+      if (!newState) {
+        _completeHooked = false; // reset hook
+        showToast("⛔ Auto-log OFF");
+      } else {
+        hookCompleteButton();
+        showToast("✅ Auto-log ON");
+      }
+    });
+
+    updateToggleUI();
+    row.appendChild(toggle);
+    return row;
+  }
+
+  // 6 action buttons, 2 rows × 3 columns — this order matches the brief
+  // exactly (Sub-Loc, Search, Copy Data, Quick Log, No Reference, Log to
+  // Sheet). Listing Info and Email Closed are gone entirely, not just
+  // hidden — see their own removed sections.
+  const COPIER_TOOLS_BUTTONS = [
+    ["copy-sub-location-btn", "Sub-Loc", () => copySecondLocation()],
+    ["search-sub-location-btn", "Search", () => searchWithSubLocation()],
+    ["copy-data-btn", "📋 Copy Data", () => copyAllData()],
+    ["quick-log-btn", "⚡ Quick Log", () => quickLogToSheet()],
+    ["no-ref-btn", "📷 No Reference", () => openNoRefModal()],
+    ["log-to-sheet-btn", "Log to Sheet", () => openLogModal()],
+  ];
+
+  function ensureCopierToolsCard() {
+    const container = findCopierDrawerSidebarContainer();
+    const ref = extractCopierDetailPageRef();
+
+    if (!container || !ref) {
+      const stale = document.getElementById("dp-copier-tools-card");
+      if (stale) stale.remove();
+      return;
+    }
+
+    let card = document.getElementById("dp-copier-tools-card");
+
+    // Navigated to a different listing via the ‹ › arrows without a full
+    // DOM remount — drop the old card so it gets rebuilt for the new ref.
+    // Same pattern as assigner-content.js's ensureDrawerAssignCard.
+    if (card && card.dataset.dpRef !== ref) {
+      card.remove();
+      card = null;
+    }
+    if (card) return; // already built for this ref
+
+    card = document.createElement("div");
+    card.id = "dp-copier-tools-card";
+    card.className = "box is-rounded is-shadowless has-border py-4 px-4 mb-5";
+    card.dataset.dpRef = ref;
+
+    const heading = document.createElement("h3");
+    heading.className = "has-text-black";
+    heading.textContent = "Copier Tools";
+    card.appendChild(heading);
+
+    card.appendChild(buildAutoLogToggle());
+
+    const grid = document.createElement("div");
+    grid.className = "dp-copier-tools-grid";
+    COPIER_TOOLS_BUTTONS.forEach(([id, text, handler]) => {
+      const btn = document.createElement("button");
+      btn.id = id;
+      btn.textContent = text;
+      btn.title = text;
+      btn.onclick = handler;
+      btn.className = "dp-custom-btn dp-copier-tools-grid-btn";
+      grid.appendChild(btn);
+    });
+    card.appendChild(grid);
+
+    // Insert directly below the Photo Assignment card (assigner-content.js)
+    // when it's already there. If it isn't yet on this tick — a timing
+    // race between the two content scripts — fall back to the same
+    // generic anchor logic ensureDrawerAssignCard() uses; the next poll
+    // tick repositions correctly once both cards exist.
+    const assignCard = document.getElementById("dp-drawer-assign-card");
+    if (assignCard && assignCard.parentElement === container) {
+      assignCard.insertAdjacentElement("afterend", card);
     } else {
-      // Animate into X
-      lines[0].style.transform = "";
-      lines[0].style.opacity = "";
-      lines[1].style.transform = "";
-      lines[1].style.opacity = "";
-      lines[2].style.transform = "";
-      lines[2].style.opacity = "";
+      const anchor = container.querySelector(".box.is-rounded.pb-5.px-5.is-hidden-mobile.handleCursor");
+      if (anchor && anchor.parentElement === container) {
+        anchor.insertAdjacentElement("afterend", card);
+      } else {
+        container.insertBefore(card, container.firstChild);
+      }
     }
   }
 
-function insertButtons() {
-  createButton("copy-listing-btn", "Listing Info", copyListingInfo);
-  createButton("copy-sub-location-btn", "Sub-Loc", copySecondLocation);
-  createButton("search-sub-location-btn", "Search", searchWithSubLocation);
-  createButton("copy-data-btn", "📋 Copy Data", copyAllData);
-  createButton("quick-log-btn", "⚡ Quick Log", quickLogToSheet);
-  createButton("no-ref-btn", "📷 No Reference", openNoRefModal);
-  createButton("log-to-sheet-btn", "Log to Sheet", openLogModal);
-  createButton("email-closed-btn", "📧 Email Closed", openEmailClosedModal);
-
-  // ✅ Only hook if toggle is ON
-  if (isHookEnabled()) {
-    hookCompleteButton();
-  }
-
-  // Give the sidebar a moment to finish rendering, then warm the agent
-  // cache right away — see ensureAgentInfoWarmed() below for why this
-  // can't just wait for a mouseenter.
-  setTimeout(ensureAgentInfoWarmed, 500);
-}
-
-  function removeButtons() {
-    document.getElementById("dp-button-wrapper")?.remove();
+  function removeCopierToolsCard() {
+    document.getElementById("dp-copier-tools-card")?.remove();
     _completeHooked = false;
     _agentWarmHooked = false; // re-find + re-hook Complete/Reject for whatever listing opens next
     _hookedCompleteBtn = null;
@@ -1655,17 +1570,17 @@ function insertButtons() {
      SPA NAVIGATION WATCHER
   ======================= */
   window.addEventListener("hashchange", () => {
-    removeButtons();
-    setTimeout(insertButtons, 400);
+    removeCopierToolsCard();
+    setTimeout(ensureCopierToolsCard, 400);
   });
 
   setInterval(() => {
-    const panelOpen = isSingleRequestPage();
-    const buttonsExist = !!document.getElementById("dp-button-wrapper");
-
-    if (panelOpen && !buttonsExist) insertButtons();
-    else if (!panelOpen && buttonsExist) removeButtons();
-    else if (panelOpen) {
+    if (isSingleRequestPage()) {
+      // ensureCopierToolsCard is idempotent (returns immediately once the
+      // card exists for the current ref — see its own comment), so it's
+      // safe to call every tick alongside the hook/warm maintenance below
+      // rather than gating on "does the card exist yet."
+      ensureCopierToolsCard();
       // Called every tick, not just once — both functions compare the
       // freshly-found button against the one they last hooked and only
       // do work when it's actually different. That's what catches Vue
@@ -1675,11 +1590,14 @@ function insertButtons() {
       hookAgentInfoWarming();
       if (isHookEnabled()) hookCompleteButton();
       // Retries itself until the current listing's agent is actually
-      // cached — covers the case where the very first attempt (right
-      // after insertButtons) ran before the avatar image had loaded.
+      // cached — covers the case where the very first attempt ran before
+      // the avatar image had loaded.
       ensureAgentInfoWarmed();
+    } else {
+      removeCopierToolsCard();
     }
   }, 600);
+
 
   /* =======================
      THEME WATCHER
@@ -1690,8 +1608,8 @@ function insertButtons() {
     const nowDark = isSiteDarkMode();
     if (nowDark !== cachedDarkMode) {
       cachedDarkMode = nowDark;
-      removeButtons();
-      setTimeout(insertButtons, 100);
+      removeCopierToolsCard();
+      setTimeout(ensureCopierToolsCard, 100);
     }
   });
 
@@ -1888,151 +1806,7 @@ function insertButtons() {
   }
 
   /* =======================
-     EMAIL CLOSED MODAL
-  ======================= */
-  function openEmailClosedModal() {
-    if (document.getElementById("dp-email-closed-modal")) return;
-    chrome.storage.local.get(["myName"], ({ myName: editorName }) => {
-      _buildEmailClosedModal(editorName || "");
-    });
-  }
-
-  function _buildEmailClosedModal(editorName) {
-    if (document.getElementById("dp-email-closed-modal")) return;
-
-    const dark = isSiteDarkMode();
-    const noEditor = !editorName;
-    const modalBg = dark ? "#1e293b" : "#ffffff";
-    const modalText = dark ? "#e5e7eb" : "#1f2937";
-    const borderCol = dark ? "#334155" : "#e5e7eb";
-    const inputBg = dark ? "#0f172a" : "#f9fafb";
-    const labelCol = dark ? "#94a3b8" : "#6b7280";
-    const accentCol = "#22d3ee";
-
-    const inputStyle = `
-      width:100%; padding:9px 12px; border-radius:8px;
-      border:1px solid ${borderCol}; background:${inputBg};
-      color:${modalText}; font-size:14px; outline:none;
-    `;
-
-    const overlay = document.createElement("div");
-    overlay.id = "dp-email-closed-modal";
-    overlay.innerHTML = `
-      <div id="dp-email-closed-backdrop" style="
-        position:fixed; inset:0; background:rgba(0,0,0,0.6);
-        z-index:99999; display:flex; align-items:center; justify-content:center;
-        backdrop-filter:blur(4px); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-      ">
-        <div style="
-          background:${modalBg}; color:${modalText}; border-radius:14px;
-          padding:26px 28px; width:400px; max-width:95vw; max-height:90vh;
-          overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,0.45);
-          border:1px solid ${borderCol};
-        ">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <div>
-              <h2 style="margin:0; font-size:15px; font-weight:700;">📧 Log Email Closed</h2>
-              <p style="margin:4px 0 0; font-size:11px; color:${accentCol}; font-weight:600;">
-                Status → <strong>Closed</strong>
-                ${noEditor ? " · ⚠️ No editor selected" : " · Logging as: " + editorName}
-              </p>
-            </div>
-            <button id="dp-email-closed-close" style="background:none;border:none;color:${labelCol};font-size:22px;cursor:pointer;line-height:1;">×</button>
-          </div>
-
-          <div style="
-            background:${inputBg}; border:1px solid ${borderCol}; border-left:3px solid ${accentCol};
-            border-radius:8px; padding:10px 14px; margin-bottom:18px;
-            font-size:11px; color:${labelCol}; line-height:1.6;
-          ">
-            No reference number needed — just what the email was about. Logged with today's date/time automatically.
-          </div>
-
-          <div style="margin-bottom:22px;">
-            <label style="display:block;font-size:11px;font-weight:700;color:${labelCol};margin-bottom:6px;text-transform:uppercase;letter-spacing:.07em;">Subject</label>
-            <input id="dp-email-closed-subject" type="text" placeholder="e.g. Follow-up on missing photos" style="${inputStyle}">
-          </div>
-
-          <div style="display:flex;gap:10px;">
-            <button id="dp-email-closed-submit" style="
-              flex:1; padding:11px 0; background:${noEditor ? "#64748b" : accentCol}; color:#fff;
-              border:none; border-radius:8px; font-size:14px; font-weight:700;
-              cursor:${noEditor ? "not-allowed" : "pointer"};
-              ${noEditor ? "opacity:0.5;" : ""}
-            ">✓ Log to Sheet</button>
-            <button id="dp-email-closed-cancel" style="
-              padding:11px 18px; background:${inputBg}; color:${modalText};
-              border:1px solid ${borderCol}; border-radius:8px; font-size:14px;
-              font-weight:600; cursor:pointer;
-            ">Cancel</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(overlay);
-
-    const subjectInput = document.getElementById("dp-email-closed-subject");
-    subjectInput.focus();
-
-    document.getElementById("dp-email-closed-close").onclick = closeEmailClosedModal;
-    document.getElementById("dp-email-closed-cancel").onclick = closeEmailClosedModal;
-    document.getElementById("dp-email-closed-backdrop").onclick = (e) => {
-      if (e.target.id === "dp-email-closed-backdrop") closeEmailClosedModal();
-    };
-
-    const submitBtn = document.getElementById("dp-email-closed-submit");
-    submitBtn.onclick = () => {
-      if (noEditor) {
-        showToast("⚠️ Select your name in the extension popup first.", true);
-        return;
-      }
-
-      const subject = subjectInput.value.trim();
-      if (!subject) {
-        showToast("⚠️ Please enter a subject.", true);
-        subjectInput.focus();
-        return;
-      }
-
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Logging…";
-
-      chrome.runtime.sendMessage(
-        { type: "LOG_EMAIL_CLOSED", payload: { subject } },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            showToast("❌ " + chrome.runtime.lastError.message, true);
-            submitBtn.disabled = false;
-            submitBtn.textContent = "✓ Log to Sheet";
-            return;
-          }
-
-          if (!(response && response.success)) {
-            showToast("❌ " + (response?.error || "Could not log — try again."), true);
-            submitBtn.disabled = false;
-            submitBtn.textContent = "✓ Log to Sheet";
-            return;
-          }
-
-          // Per request: copy "Email Closed | <Subject>" to the clipboard
-          // once it's actually logged, so it's ready to paste wherever
-          // this needs to be referenced next (e.g. back into the CRM).
-          navigator.clipboard.writeText(`Email Closed | ${subject}`).catch(() => {});
-
-          showToast("✅ Logged and copied to clipboard.");
-          closeEmailClosedModal();
-        }
-      );
-    };
-  }
-
-  function closeEmailClosedModal() {
-    document.getElementById("dp-email-closed-modal")?.remove();
-  }
-
-  /* =======================
      INIT
   ======================= */
-  setTimeout(insertButtons, 800);
+  setTimeout(ensureCopierToolsCard, 800);
 })();
