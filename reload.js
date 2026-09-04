@@ -263,6 +263,11 @@ const CHANGELOG = [
     "Restarting a Completed or Rejected listing now asks which category it's being restarted into first, and puts it back as Unassigned \u2014 open for anyone to pick up \u2014 instead of automatically reassigning it straight back to the same editor. Cancelling the prompt leaves everything unchanged.",
     "The Time History on a restarted listing now shows one continuous timeline covering every cycle it's been through, instead of resetting each time it's restarted.",
   ]},
+      { version: 98, notes: [
+    "Fixed a bug where completing a listing via the CRM's own Complete button (rather than the extension's own quick-action buttons) could briefly make it vanish from the side panel's Quick Report and totals until the next refresh.",
+    "Fixed a bug where a listing's category didn't show up in the side panel right after assigning it \u2014 it now appears immediately instead of waiting for the next refresh.",
+    "Fixed the On Duty checkbox occasionally flipping back right after being toggled.",
+  ]},
 ];
 
 const card = document.getElementById("card");

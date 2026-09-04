@@ -1317,7 +1317,13 @@
         assignmentCache[ref] = { editor, status: "Assigned", title,
           onHoldReason: isReAssign ? "" : (previousEntry && previousEntry.onHoldReason) || "",
           bedrooms: (previousEntry && previousEntry.bedrooms) || "",
-          crmStatus: categoryOverride || (previousEntry && previousEntry.crmStatus) || "",
+          // liveCrmStatus is already sitting right there in the DOM at
+          // click time (read above for the reshoot check), so use it as
+          // the primary source here too rather than waiting on
+          // previousEntry — previousEntry.crmStatus is empty for a
+          // brand-new listing this extension hasn't fully synced yet,
+          // which was leaving the category blank until the next poll.
+          crmStatus: categoryOverride || liveCrmStatus || (previousEntry && previousEntry.crmStatus) || "",
           assignedAt: carriedAssignedAt,
           reassignedAt: isReAssign ? now : "" };
         markLocalChange(ref);
@@ -3947,9 +3953,14 @@
     const previousEntry = assignmentCache[ref] || null;
     const editor = previousEntry ? previousEntry.editor || "" : "";
     const title  = previousEntry ? previousEntry.title  || "" : "";
-    assignmentCache[ref] = { editor, status: "Completed", title, completedAt: new Date().toISOString(),
-      bedrooms: (previousEntry && previousEntry.bedrooms) || "",
-      crmStatus: (previousEntry && previousEntry.crmStatus) || "" };
+    // Spread the previous entry first (same shape as completeFromDrawer)
+    // so assignedAt/reassignedAt survive the optimistic update — without
+    // this, computeQuickReport/getAutoAssignRecommendation in sidepanel.js
+    // (both keyed off effectiveAt = reassignedAt || assignedAt) silently
+    // drop the row from every tally until the next full poll re-fetches
+    // the real row from the sheet.
+    assignmentCache[ref] = { ...(previousEntry || {}), editor, status: "Completed", title,
+      completedAt: new Date().toISOString() };
     markLocalChange(ref);
     document.querySelectorAll(".dp-assign-cell").forEach(c => {
       if (c.dataset.dpRef === ref) {

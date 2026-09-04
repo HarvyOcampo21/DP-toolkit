@@ -282,6 +282,15 @@ let assignmentByRef = {};
 let lastLocalChangeAt = {};
 const LOCAL_CHANGE_COOLDOWN_MS = 50000; // matches assigner-content.js — comfortably longer than DP_VERIFY_MAX_ATTEMPTS × DP_VERIFY_RETRY_DELAY_MS (the ~45s verify-before-revert window, defined further down), so a poll can never win that race
 
+// Same cooldown-protection idea as lastLocalChangeAt above, but per-editor
+// for On Duty toggles rather than per-Ref for assignments — refreshFromServer
+// previously overwrote autoAssignConfig unconditionally on every poll, with
+// no protection at all, so a poll landing shortly after a toggle (before
+// DP_SET_AUTO_ASSIGN_ELIGIBILITY's write was reflected server-side) would
+// silently flip the checkbox back. Reuses LOCAL_CHANGE_COOLDOWN_MS rather
+// than a separate threshold — same reasoning applies either way.
+let lastLocalAutoAssignChangeAt = {};
+
 // ── Today's activity stats (Completed / Rejected / Total) ────────────────
 // Scoped the same way the Assignment Dashboard's "Today" view scopes every
 // status bucket (computeDashboardStats in assigner-content.js, the source
@@ -569,11 +578,13 @@ function renderOnDutyList() {
       // anything other than success.
       const previous = autoAssignConfig[name] !== false;
       autoAssignConfig = { ...autoAssignConfig, [name]: eligible };
+      lastLocalAutoAssignChangeAt[name] = Date.now();
       renderNextUpLine();
       chrome.runtime.sendMessage({ type: "DP_SET_AUTO_ASSIGN_ELIGIBILITY", editor: name, eligible }, resp => {
         if (!(resp && resp.ok)) {
           cb.checked = previous;
           autoAssignConfig = { ...autoAssignConfig, [name]: previous };
+          lastLocalAutoAssignChangeAt[name] = Date.now();
           renderNextUpLine();
           showToast(`Could not update ${name}'s On duty status.`);
         }
@@ -810,7 +821,15 @@ function refreshFromServer(name) {
     currentTodayStats = computeTodayStats(allKnown, name);
     allAssignmentsForAutoAssign = allKnown;
     if (resp.data.autoAssignConfig && typeof resp.data.autoAssignConfig === "object") {
-      autoAssignConfig = resp.data.autoAssignConfig;
+      // Cooldown-protected per editor, same idea as the assignment merge
+      // just above — see lastLocalAutoAssignChangeAt's own comment for why.
+      const freshAutoAssignConfig = resp.data.autoAssignConfig;
+      const mergedAutoAssignConfig = { ...autoAssignConfig };
+      EDITORS.forEach(editorName => {
+        const withinCooldown = (Date.now() - (lastLocalAutoAssignChangeAt[editorName] || 0)) < LOCAL_CHANGE_COOLDOWN_MS;
+        if (!withinCooldown) mergedAutoAssignConfig[editorName] = freshAutoAssignConfig[editorName];
+      });
+      autoAssignConfig = mergedAutoAssignConfig;
     }
     renderList(name);
     renderAutoAssignSettings();
