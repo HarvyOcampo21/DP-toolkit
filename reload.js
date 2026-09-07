@@ -272,6 +272,9 @@ const CHANGELOG = [
     "Replaced the floating hamburger toolbar on a single listing with a new \u201cCopier Tools\u201d card, in the same spot as Photo Assignment \u2014 the Auto-log toggle and the Sub-Loc, Search, Copy Data, Quick Log, No Reference, and Log to Sheet buttons now live there instead of a separate floating panel.",
     "Removed the \u201cListing Info\u201d and \u201cEmail Closed\u201d buttons, along with the Alt+C shortcut that copied listing info \u2014 the toolbar's own \u201cCopy\u201d button covers the same ground as Listing Info.",
   ]},
+      { version: 100, notes: [
+    "The Photo Requests list now defaults to showing 100 items per page instead of the CRM's own smaller default, each time the list is freshly opened. Changing it manually during a session is respected \u2014 it won't get reset back to 100 while you're still on the page.",
+  ]},
 ];
 
 const card = document.getElementById("card");
