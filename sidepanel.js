@@ -5,9 +5,9 @@
 // assigner-content.js. Add/move names here as the team changes.
 const NAME_ROLES = {
   Harvy:   "senior",
+  Jabir:   "senior",
   Mark:    "senior",
   Sudheep: "senior",
-  Jabir: "senior",
 };
 function roleForName(name) {
   return NAME_ROLES[name] || "junior"; // unknown names default to the safer role
@@ -1738,6 +1738,25 @@ if (openNewTabToggle) {
   });
   openNewTabToggle.addEventListener("change", () => {
     chrome.storage.local.set({ dpOpenListingNewTab: openNewTabToggle.checked });
+  });
+}
+
+// ── Configuration: Default page size (Photo Requests list) ──────────────
+// Read by default-page-size-content.js on the CRM page, live-synced there
+// via its own chrome.storage.onChanged listener — same pattern as
+// dpOpenListingNewTab just above, so a change here takes effect on the
+// list's next reassert tick without needing a reload. Defaults to 100 if
+// never touched, matching that file's own fallback.
+const pageSizeRadios = document.querySelectorAll('input[name="dpPageSize"]');
+if (pageSizeRadios.length) {
+  chrome.storage.local.get(["defaultPageSize"], result => {
+    const current = String(result.defaultPageSize || "100");
+    pageSizeRadios.forEach(r => { r.checked = r.value === current; });
+  });
+  pageSizeRadios.forEach(r => {
+    r.addEventListener("change", () => {
+      if (r.checked) chrome.storage.local.set({ defaultPageSize: r.value });
+    });
   });
 }
 

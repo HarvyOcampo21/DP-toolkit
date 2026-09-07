@@ -1,52 +1,93 @@
 "use strict";
 
 // ═══════════════════════════════════════════════════════════════════════
-// DEFAULT "ITEMS PER PAGE" TO 100 — content script side
+// DEFAULT "ITEMS PER PAGE" — content script side
 // ═══════════════════════════════════════════════════════════════════════
 // Finds the Photo Requests list view's own "items per page" dropdown and
-// sets it to 100, dispatching a real change event so the CRM's own logic
-// picks it up and re-fetches the list — same idea as
+// keeps it at the configured default (100/200/500, chosen in the side
+// panel's Settings drawer — see defaultPageSize in chrome.storage.local,
+// defaulting to 100 if never touched), dispatching a real change event so
+// the CRM's own logic picks it up and re-fetches the list — same idea as
 // auto-all-click-content.js's approach to triggering the CRM's own UI
 // programmatically rather than reimplementing its pagination logic here.
 //
-// Important distinction from that file: Auto-click All deliberately
-// re-applies periodically (via an alarm), because the CRM can reset that
-// filter state on its own. This is a ONE-TIME default per page
-// load/view-entry, not a recurring override — if someone manually changes
-// it to 10/25/50 during their session, this leaves it alone rather than
-// fighting them back to 100 on the next tick. appliedThisView only resets
-// on hashchange (navigating into the list view fresh), same
-// SPA-navigation-watcher pattern already used in quick-copy-content.js —
-// the interval below just polls for the dropdown to exist yet (it may not
-// have rendered when this script first runs, or right after navigating
-// back to the list), not for a reason to re-apply.
-let appliedThisView = false;
+// v1 (PAGESIZE-01) only reapplied once per hashchange/navigation into the
+// list view, on the theory that the dropdown only ever resets on a real
+// page navigation. That missed a real case: clicking a status filter tab
+// (All/Pending/etc.) is a client-side re-render, not a hashchange — it
+// silently resets the CRM's own <select> back to its native default (10)
+// without ever firing a hashchange, so the old one-shot "already applied"
+// flag stayed set and never noticed. Fixed here by watching the select's
+// actual value continuously — the same polling-interval pattern already
+// used elsewhere in this codebase (e.g. quick-copy-content.js) — instead
+// of a one-shot flag: every tick, if the observed value has drifted away
+// from the configured default AND that drift wasn't a genuine, direct
+// user pick (see userJustPickedManually below), it gets reapplied.
+//
+// Distinguishing "the CRM silently reset it" from "the person actually
+// picked something else" matters — manual overrides during a session are
+// still meant to be respected, exactly as in v1. The signal used for that
+// is the select's native `input` event: a real user pick fires both
+// `input` and `change` on a <select>, but setting `.value` from script and
+// manually dispatching only `change` — which is exactly what this file's
+// own reapplication does below, and all it needs to for the CRM's own
+// logic to pick it up — never fires `input`. So `input` is an unambiguous
+// "a person, not this script, just touched this dropdown" signal, immune
+// to catching this script's own writes. userJustPickedManually persists
+// for the rest of the view-entry once set (same "session" scope as v1's
+// flag) — a later CRM re-render is free to reset the select's own value
+// again after that, but this script won't fight it back once someone has
+// deliberately chosen something else.
+let configuredDefault = "100";
+let userJustPickedManually = false;
+
+chrome.storage.local.get(["defaultPageSize"], result => {
+  if (result && result.defaultPageSize) configuredDefault = String(result.defaultPageSize);
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.defaultPageSize) {
+    configuredDefault = String(changes.defaultPageSize.newValue || "100");
+  }
+});
 
 function findPerPageSelect() {
   const container = document.querySelector(".dds__pagination__per-page-select");
   return container ? container.querySelector("select") : null;
 }
 
-function applyDefaultPageSize() {
-  if (appliedThisView) return;
+// Tracked by reference, not just "has a listener ever been bound" — a
+// filter-tab click can swap in a brand-new <select> element entirely
+// rather than mutating the old one's value, and a listener bound to the
+// old (now-detached) element would never fire again.
+let boundSelect = null;
 
+function bindManualOverrideListener(select) {
+  if (boundSelect === select) return;
+  boundSelect = select;
+  select.addEventListener("input", () => {
+    userJustPickedManually = true;
+  });
+}
+
+function reassertDefaultPageSize() {
   const select = findPerPageSelect();
   if (!select) return; // not on the list view yet, or it hasn't rendered — retry next tick
 
-  // Found it — this view-entry's one-time decision is made right here,
-  // regardless of the outcome below. Nothing after this point should ever
-  // run again until the next hashchange resets the flag.
-  appliedThisView = true;
+  bindManualOverrideListener(select);
 
-  if (select.value === "100") return; // already 100 — nothing to change, nothing to dispatch
+  if (userJustPickedManually) return; // respecting the person's own choice for this view-entry
 
-  select.value = "100";
+  if (select.value === configuredDefault) return; // already correct — nothing to change, nothing to dispatch
+
+  select.value = configuredDefault;
   select.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 window.addEventListener("hashchange", () => {
-  appliedThisView = false;
+  userJustPickedManually = false;
+  boundSelect = null;
 });
 
-setInterval(applyDefaultPageSize, 600);
-setTimeout(applyDefaultPageSize, 800);
+setInterval(reassertDefaultPageSize, 600);
+setTimeout(reassertDefaultPageSize, 800);

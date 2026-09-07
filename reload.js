@@ -278,6 +278,11 @@ const CHANGELOG = [
       { version: 101, notes: [
     "Fixed Quick Report, Today's Activity, the Assignment Dashboard, and Next Up's daily counts dropping a listing's earlier Completed or Rejected outcome the moment it got restarted \u2014 restarting now correctly keeps the original outcome counted AND adds the new cycle, instead of the restart silently erasing the earlier one from today's totals.",
   ]},
+      { version: 102, notes: [
+    "Fixed the Photo Requests list's default page size snapping back to 10 when clicking a status filter tab (All/Pending/etc.) \u2014 it now stays at the configured default through filter clicks, not just on a fresh page load.",
+    "Added a setting (Settings \u2192 Items per page) to choose 100, 200, or 500 as the default \u2014 100 remains the default for anyone who hasn't touched this.",
+    "Jabir is now a senior editor.",
+  ]},
 ];
 
 const card = document.getElementById("card");

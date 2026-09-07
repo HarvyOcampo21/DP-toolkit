@@ -273,6 +273,17 @@
   }
   .dp-onduty-row input[type="checkbox"] { accent-color: #00d1b2; width: 14px; height: 14px; }
 
+  /* ── Default page size — 100/200/500 (Configuration, inside the
+     Settings drawer) — same visual language as the on-duty rows above,
+     just three side-by-side choices instead of a checkbox column. ── */
+  .dp-pagesize-row { display: flex; gap: 8px; margin-top: 8px; }
+  .dp-pagesize-choice {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 7px 0; border-radius: 8px; border: 1px solid #353b4d;
+    font-size: 12.5px; color: #c7cbd8; cursor: pointer;
+  }
+  .dp-pagesize-choice input[type="radio"] { accent-color: #00d1b2; width: 13px; height: 13px; }
+
   /* ── Settings drawer: a bottom sheet that slides up over everything else
      (including the pinned footer) rather than living inline in the page
      flow, since Auto-Refresh CRM + Configuration are settings someone
@@ -533,6 +544,22 @@
           <span class="dp-switch-slider"></span>
         </label>
         <span class="dp-toggle-label">Open listings in a new tab</span>
+      </div>
+
+      <div class="section-title" style="margin-top:14px;">Items per page (default)</div>
+      <div class="dp-pagesize-row">
+        <label class="dp-pagesize-choice">
+          <input type="radio" name="dpPageSize" value="100">
+          <span>100</span>
+        </label>
+        <label class="dp-pagesize-choice">
+          <input type="radio" name="dpPageSize" value="200">
+          <span>200</span>
+        </label>
+        <label class="dp-pagesize-choice">
+          <input type="radio" name="dpPageSize" value="500">
+          <span>500</span>
+        </label>
       </div>
 
       <div id="dpAutoAssignSection">
