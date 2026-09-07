@@ -1,15 +1,19 @@
 "use strict";
 
 // ═══════════════════════════════════════════════════════════════════════
-// DEFAULT "ITEMS PER PAGE" — content script side
+// DEFAULT "ITEMS PER PAGE" TO 100 — content script side
 // ═══════════════════════════════════════════════════════════════════════
-// Finds the Photo Requests list view's own "items per page" dropdown and
-// keeps it at the configured default (100/200/500, chosen in the side
-// panel's Settings drawer — see defaultPageSize in chrome.storage.local,
-// defaulting to 100 if never touched), dispatching a real change event so
-// the CRM's own logic picks it up and re-fetches the list — same idea as
-// auto-all-click-content.js's approach to triggering the CRM's own UI
-// programmatically rather than reimplementing its pagination logic here.
+// Gated on a single on/off toggle in the side panel's Settings drawer
+// (defaultPageSizeEnabled in chrome.storage.local, defaulting to true so
+// existing behavior is preserved for anyone who hasn't touched it — see
+// dpPageSizeToggle in sidepanel.js). When on, finds the Photo Requests
+// list view's own "items per page" dropdown and keeps it pinned to 100,
+// dispatching a real change event so the CRM's own logic picks it up and
+// re-fetches the list — same idea as auto-all-click-content.js's approach
+// to triggering the CRM's own UI programmatically rather than
+// reimplementing its pagination logic here. When off, this does nothing
+// at all — doesn't even look at the dropdown — leaving the CRM's native
+// pagination behavior exactly as if this script weren't here.
 //
 // v1 (PAGESIZE-01) only reapplied once per hashchange/navigation into the
 // list view, on the theory that the dropdown only ever resets on a real
@@ -20,9 +24,9 @@
 // flag stayed set and never noticed. Fixed here by watching the select's
 // actual value continuously — the same polling-interval pattern already
 // used elsewhere in this codebase (e.g. quick-copy-content.js) — instead
-// of a one-shot flag: every tick, if the observed value has drifted away
-// from the configured default AND that drift wasn't a genuine, direct
-// user pick (see userJustPickedManually below), it gets reapplied.
+// of a one-shot flag: every tick (while enabled), if the observed value
+// has drifted away from 100 AND that drift wasn't a genuine, direct user
+// pick (see userJustPickedManually below), it gets reapplied.
 //
 // Distinguishing "the CRM silently reset it" from "the person actually
 // picked something else" matters — manual overrides during a session are
@@ -38,16 +42,16 @@
 // flag) — a later CRM re-render is free to reset the select's own value
 // again after that, but this script won't fight it back once someone has
 // deliberately chosen something else.
-let configuredDefault = "100";
+let enabled = true;
 let userJustPickedManually = false;
 
-chrome.storage.local.get(["defaultPageSize"], result => {
-  if (result && result.defaultPageSize) configuredDefault = String(result.defaultPageSize);
+chrome.storage.local.get(["defaultPageSizeEnabled"], result => {
+  enabled = result && result.defaultPageSizeEnabled !== false;
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.defaultPageSize) {
-    configuredDefault = String(changes.defaultPageSize.newValue || "100");
+  if (area === "local" && changes.defaultPageSizeEnabled) {
+    enabled = changes.defaultPageSizeEnabled.newValue !== false;
   }
 });
 
@@ -71,6 +75,8 @@ function bindManualOverrideListener(select) {
 }
 
 function reassertDefaultPageSize() {
+  if (!enabled) return; // feature turned off — don't touch the DOM at all
+
   const select = findPerPageSelect();
   if (!select) return; // not on the list view yet, or it hasn't rendered — retry next tick
 
@@ -78,9 +84,9 @@ function reassertDefaultPageSize() {
 
   if (userJustPickedManually) return; // respecting the person's own choice for this view-entry
 
-  if (select.value === configuredDefault) return; // already correct — nothing to change, nothing to dispatch
+  if (select.value === "100") return; // already 100 — nothing to change, nothing to dispatch
 
-  select.value = configuredDefault;
+  select.value = "100";
   select.dispatchEvent(new Event("change", { bubbles: true }));
 }
 

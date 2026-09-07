@@ -283,6 +283,9 @@ const CHANGELOG = [
     "Added a setting (Settings \u2192 Items per page) to choose 100, 200, or 500 as the default \u2014 100 remains the default for anyone who hasn't touched this.",
     "Jabir is now a senior editor.",
   ]},
+      { version: 103, notes: [
+    "Replaced the 100/200/500 page-size picker from v102 with a single \u201cDefault to 100 per page\u201d on/off toggle in Settings \u2014 on (the default) keeps the Photo Requests list pinned to 100 per page; off leaves the CRM's own pagination completely alone.",
+  ]},
 ];
 
 const card = document.getElementById("card");

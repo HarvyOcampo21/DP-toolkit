@@ -1744,19 +1744,18 @@ if (openNewTabToggle) {
 // ── Configuration: Default page size (Photo Requests list) ──────────────
 // Read by default-page-size-content.js on the CRM page, live-synced there
 // via its own chrome.storage.onChanged listener — same pattern as
-// dpOpenListingNewTab just above, so a change here takes effect on the
-// list's next reassert tick without needing a reload. Defaults to 100 if
-// never touched, matching that file's own fallback.
-const pageSizeRadios = document.querySelectorAll('input[name="dpPageSize"]');
-if (pageSizeRadios.length) {
-  chrome.storage.local.get(["defaultPageSize"], result => {
-    const current = String(result.defaultPageSize || "100");
-    pageSizeRadios.forEach(r => { r.checked = r.value === current; });
+// dpOpenListingNewTab just above, so flipping this takes effect on the
+// list's next reassert tick without needing a reload. Defaults to true
+// (on) so existing behavior is preserved for anyone who hasn't touched
+// this — turning it off leaves the CRM's own native pagination behavior
+// completely alone, including whatever it falls back to on its own.
+const pageSizeToggle = document.getElementById("dpPageSizeToggle");
+if (pageSizeToggle) {
+  chrome.storage.local.get(["defaultPageSizeEnabled"], result => {
+    pageSizeToggle.checked = result.defaultPageSizeEnabled !== false;
   });
-  pageSizeRadios.forEach(r => {
-    r.addEventListener("change", () => {
-      if (r.checked) chrome.storage.local.set({ defaultPageSize: r.value });
-    });
+  pageSizeToggle.addEventListener("change", () => {
+    chrome.storage.local.set({ defaultPageSizeEnabled: pageSizeToggle.checked });
   });
 }
 
