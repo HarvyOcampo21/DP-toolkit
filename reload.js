@@ -275,6 +275,9 @@ const CHANGELOG = [
       { version: 100, notes: [
     "The Photo Requests list now defaults to showing 100 items per page instead of the CRM's own smaller default, each time the list is freshly opened. Changing it manually during a session is respected \u2014 it won't get reset back to 100 while you're still on the page.",
   ]},
+      { version: 101, notes: [
+    "Fixed Quick Report, Today's Activity, the Assignment Dashboard, and Next Up's daily counts dropping a listing's earlier Completed or Rejected outcome the moment it got restarted \u2014 restarting now correctly keeps the original outcome counted AND adds the new cycle, instead of the restart silently erasing the earlier one from today's totals.",
+  ]},
 ];
 
 const card = document.getElementById("card");

@@ -292,16 +292,25 @@ const LOCAL_CHANGE_COOLDOWN_MS = 50000; // matches assigner-content.js — comfo
 let lastLocalAutoAssignChangeAt = {};
 
 // ── Today's activity stats (Completed / Rejected / Total) ────────────────
-// Scoped the same way the Assignment Dashboard's "Today" view scopes every
-// status bucket (computeDashboardStats in assigner-content.js, the source
-// of truth here): by the row's own effective assignment date (reassignedAt
-// || assignedAt), then bucketed by whatever the row's CURRENT status is —
-// not by scanning history for a completed/rejected event timestamped today.
-// A same-day resolution on a listing assigned earlier therefore does NOT
-// show up here; it counts toward whichever day it was assigned, matching
-// the Dashboard. Nothing to reset at midnight: since it's always computed
-// fresh off real timestamps rather than an incrementing counter, it
-// naturally only ever reflects "today" the moment the clock rolls over.
+// Scoped the same way the Assignment Dashboard scopes every status bucket
+// (computeDashboardStats in assigner-content.js, the source of truth
+// here): by each ROW's own effective assignment date (reassignedAt ||
+// assignedAt), bucketed by that row's own status — not by scanning
+// history for a completed/rejected event timestamped today.
+//
+// Reads allRawAssignmentRows (every row DP_GET_ALL returns, not collapsed
+// to one row per Ref) rather than the collapsed assignmentByRef cache —
+// restart/reopen append a brand-new row per cycle rather than editing in
+// place (see restartCompleted/restartRejected/reopenOnCategoryChange in
+// the Apps Script), so a Ref reworked today can have an earlier resolved
+// row (Completed/Rejected, from this morning's cycle) AND a newer active
+// row (from this afternoon's) both qualifying independently. Counting raw
+// rows means both contribute to the total — nothing nets out, nothing
+// gets silently overwritten by whichever row happens to be current right
+// now. A Ref with only one qualifying row today behaves exactly as before.
+// Nothing to reset at midnight: since it's always computed fresh off real
+// timestamps rather than an incrementing counter, it naturally only ever
+// reflects "today" the moment the clock rolls over.
 let currentTodayStats = { completed: 0, rejected: 0, total: 0 };
 
 function isToday(iso) {
@@ -360,24 +369,27 @@ function stopDateTimeClock() {
 // A compact, always-TODAY, team-wide summary — deliberately NOT the
 // Assignment Dashboard's date-range report (no Today/Yesterday/Custom
 // Range filters here; see the "Sidepanel UI Redesign" requirements doc).
-// Purely observational: reads allAssignmentsForAutoAssign, the same
-// already-fresh data (kept current by refreshFromServer's poll AND
-// applyLivePatch's instant push — see there) that Next Up already uses.
-// Never writes or otherwise touches assignment state — this only ever
-// summarizes what's already true elsewhere.
+// Purely observational: reads allRawAssignmentRows, the same already-fresh
+// data (kept current by refreshFromServer's poll AND applyLivePatch's
+// instant push — see there) that Next Up already uses. Never writes or
+// otherwise touches assignment state — this only ever summarizes what's
+// already true elsewhere.
 //
 // Every bucket — Completed, Rejected, Pending, On Hold — is scoped the
-// same way the Assignment Dashboard's "Today" view scopes them
-// (computeDashboardStats in assigner-content.js, the source of truth):
-// an assignment only counts if it was actually assigned/reassigned today
-// (effectiveAt = reassignedAt || assignedAt, same pattern
-// getAutoAssignRecommendation already uses further down), then bucketed
-// by whatever the row's CURRENT status is. A listing that's simply still
-// sitting open from a previous day must NOT pull its editor into today's
-// report just because it's still technically "theirs". This also means a
-// same-day Completed/Rejected resolution on a listing assigned earlier
-// does NOT show up here — it counts toward whichever day it was assigned,
-// consistent with the Dashboard. perEditor only ever gets an entry via
+// same way the Assignment Dashboard scopes them (computeDashboardStats in
+// assigner-content.js, the source of truth): an assignment only counts if
+// it was actually assigned/reassigned today (effectiveAt = reassignedAt
+// || assignedAt, same pattern getAutoAssignRecommendation already uses
+// further down), then bucketed by that row's own status. A listing that's
+// simply still sitting open from a previous day must NOT pull its editor
+// into today's report just because it's still technically "theirs".
+//
+// Counts every qualifying ROW independently, not one collapsed row per
+// Ref — restart/reopen append a brand-new row per cycle rather than
+// editing in place, so a Ref restarted today (e.g. Rejected this morning,
+// reassigned this afternoon) contributes to BOTH buckets: one Rejected,
+// one Pending. Nothing nets out. A Ref with only one qualifying row today
+// behaves exactly as before. perEditor only ever gets an entry via
 // bump(), so a row simply won't exist for an editor with zero today
 // activity — no separate empty-row filter needed.
 function computeQuickReport(allAssignments) {
@@ -427,7 +439,7 @@ function qrRow(cells, opts) {
 function renderQuickReport() {
   const tableEl = document.getElementById("dpQuickReportTable");
   if (!tableEl) return;
-  const { rows, totals } = computeQuickReport(allAssignmentsForAutoAssign);
+  const { rows, totals } = computeQuickReport(allRawAssignmentRows);
   tableEl.innerHTML = "";
 
   if (!rows.length) {
@@ -507,11 +519,19 @@ function renderTodayStats() {
 // Auto-assign here; it never assigns anything itself. The actual engine
 // that watches for fresh Unassigned listings and calls assign() still has
 // to live in assigner-content.js, since that requires the CRM page's own
-// DOM. autoAssignConfig and allAssignmentsForAutoAssign are refreshed
-// alongside every regular poll in refreshFromServer.
+// DOM. autoAssignConfig and allRawAssignmentRows are refreshed alongside
+// every regular poll in refreshFromServer.
 const EDITORS = ["Harvy", "Jabir", "Mark", "Sudheep"];
 let autoAssignConfig = {};
-let allAssignmentsForAutoAssign = [];
+// Every row DP_GET_ALL returns, not collapsed to one row per Ref — see
+// computeQuickReport's own comment above for the full rationale (restart/
+// reopen append a brand-new row per cycle, so a Ref reworked today can
+// have more than one row qualifying independently). counts below is a
+// per-row tally on purpose: an editor who resolved one cycle of a listing
+// today and then got the SAME (restarted) listing back today genuinely
+// did two units of work today, and should count as such for load-balancing
+// purposes — not net out to one just because it's the same Ref.
+let allRawAssignmentRows = [];
 
 function getAutoAssignRecommendation() {
   const counts = {};
@@ -520,7 +540,7 @@ function getAutoAssignRecommendation() {
   const todayStr = new Date().toDateString();
   let lastPicked = null, lastPickedAt = -Infinity;
 
-  allAssignmentsForAutoAssign.forEach(entry => {
+  allRawAssignmentRows.forEach(entry => {
     if (!entry || !entry.editor || !EDITORS.includes(entry.editor)) return;
     const effectiveAt = entry.reassignedAt || entry.assignedAt;
     if (!effectiveAt) return;
@@ -818,8 +838,14 @@ function refreshFromServer(name) {
 
     const allKnown = Object.values(assignmentByRef);
     currentAssignments = allKnown.filter(a => a.editor === name && ACTIVE_STATUSES.includes(a.status));
-    currentTodayStats = computeTodayStats(allKnown, name);
-    allAssignmentsForAutoAssign = allKnown;
+    // Today's Activity/Quick Report/Next Up all count every qualifying ROW
+    // independently (restart/reopen append a brand-new row per cycle
+    // rather than editing in place — see REPORT-01), so they read the raw,
+    // un-collapsed response here rather than allKnown (which stays
+    // collapsed, correctly, for currentAssignments above — Active
+    // Assignments cards only ever care about a Ref's current live state).
+    allRawAssignmentRows = resp.data.assignments.filter(a => a && a.ref);
+    currentTodayStats = computeTodayStats(allRawAssignmentRows, name);
     if (resp.data.autoAssignConfig && typeof resp.data.autoAssignConfig === "object") {
       // Cooldown-protected per editor, same idea as the assignment merge
       // just above — see lastLocalAutoAssignChangeAt's own comment for why.
@@ -1204,11 +1230,31 @@ function applyLivePatch(ref, patch, downloaded, ts) {
   if (patch) assignmentByRef[ref] = typeof downloaded === "boolean" ? { ...patch, downloaded } : patch;
   else delete assignmentByRef[ref];
 
-  // Keeps Quick Report (and Next Up, which already read this) instantly
-  // in sync too — without this, both would only ever see a live-pushed
-  // change once the next full poll happened to run, defeating the whole
-  // point of pushing it instantly in the first place.
-  allAssignmentsForAutoAssign = Object.values(assignmentByRef);
+  // Keeps Quick Report/Today's Activity/Next Up instantly in sync too —
+  // without this, they'd only ever see a live-pushed change once the next
+  // full poll happened to run, defeating the whole point of pushing it
+  // instantly in the first place.
+  //
+  // This updates the LAST matching row for this Ref in place (or appends
+  // one if none exists yet) — correct for the common case, an in-place
+  // status change on the same row (Start/Hold/Complete/Reject/Assign,
+  // none of which create a new row). It does NOT know how to represent
+  // "this action created a brand-new row, the old one should still count
+  // separately" — a live patch only ever carries "this Ref's current
+  // state is now X," not a full event log, so a restart's live patch will
+  // still momentarily look like the pre-REPORT-01 bug (the old resolved
+  // row's count briefly appears to vanish) until the next full poll
+  // rebuilds allRawAssignmentRows from the server's actual multi-row
+  // response, at which point it self-corrects and STAYS correct — unlike
+  // the bug this fixes, which stayed wrong indefinitely. Fixing this
+  // instant-patch gap for restarts specifically would need markLocalChange/
+  // broadcastLivePatch (assigner-content.js) to distinguish "edited this
+  // row" from "created a new row" for every one of their ~20 call sites,
+  // which is out of scope here — flagged rather than attempted partially.
+  const patchIdx = patch ? allRawAssignmentRows.map(a => a.ref).lastIndexOf(ref) : -1;
+  if (patch && patchIdx > -1) allRawAssignmentRows[patchIdx] = patch;
+  else if (patch) allRawAssignmentRows.push(patch);
+  else allRawAssignmentRows = allRawAssignmentRows.filter(a => a.ref !== ref);
 
   chrome.storage.local.get(["myName"], ({ myName }) => {
     if (!myName) return;
