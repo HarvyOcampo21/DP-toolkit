@@ -286,6 +286,9 @@ const CHANGELOG = [
       { version: 103, notes: [
     "Replaced the 100/200/500 page-size picker from v102 with a single \u201cDefault to 100 per page\u201d on/off toggle in Settings \u2014 on (the default) keeps the Photo Requests list pinned to 100 per page; off leaves the CRM's own pagination completely alone.",
   ]},
+      { version: 104, notes: [
+    "Reverted v101: Quick Report, Today's Activity, the Assignment Dashboard, and Next Up's daily counts are back to reflecting only a listing's current status \u2014 restarting a Completed or Rejected listing now removes it from that count again once the new cycle takes over, same as before v101.",
+  ]},
 ];
 
 const card = document.getElementById("card");

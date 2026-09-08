@@ -2552,19 +2552,6 @@
     return t;
   }
 
-  // Iterates rowsByRef — every raw row DP_GET_ALL returned, not collapsed
-  // to one row per Ref (already built for the History modal — see
-  // rowsByRef's own comment at declaration) — rather than assignmentCache,
-  // the collapsed per-ref cache. restart/reopen append a brand-new row per
-  // cycle instead of editing in place, so a Ref reworked within the
-  // selected date range can have an earlier resolved row (Completed/
-  // Rejected) AND a newer active row both qualify independently: each
-  // counts on its own, nothing nets out just because a newer row now
-  // exists for the same Ref. A Ref with only one qualifying row behaves
-  // exactly as before. assignmentCache stays the source for anything
-  // reflecting CURRENT live state instead (Active Assignments cards, the
-  // drawer's Photo Assignment card, auto-assign eligibility) — this
-  // function is the only "count every row, not the ref" consumer here.
   function computeDashboardStats(scope) {
     const range = scopeToRange(scope);
     const byEditor = {};
@@ -2585,11 +2572,11 @@
       };
     });
 
-    Object.values(rowsByRef).forEach(rows => rows.forEach(entry => {
-      const ref = entry && entry.ref;
+    Object.keys(assignmentCache).forEach(ref => {
+      const entry = assignmentCache[ref];
       // Track anything with a status — assigned listings, or unassigned
       // listings that were put on hold. Untouched listings have no status.
-      if (!ref || !entry || !entry.status) return;
+      if (!entry || !entry.status) return;
 
       // Unassigned listings have no assignedAt (they were never assigned) —
       // use onHoldAt instead so date-range scoping still works for them.
@@ -2645,7 +2632,7 @@
       if (scopeTimestamp && (!target.latest || new Date(scopeTimestamp) > new Date(target.latest.assignedAt))) {
         target.latest = { ref, title: entry.title || "", bedBucket, crmStatus: category, assignedAt: scopeTimestamp };
       }
-    }));
+    });
 
     return { byEditor, team, unassigned, fromDomFallback, uncategorized };
   }
