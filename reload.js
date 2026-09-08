@@ -289,6 +289,11 @@ const CHANGELOG = [
       { version: 104, notes: [
     "Reverted v101: Quick Report, Today's Activity, the Assignment Dashboard, and Next Up's daily counts are back to reflecting only a listing's current status \u2014 restarting a Completed or Rejected listing now removes it from that count again once the new cycle takes over, same as before v101.",
   ]},
+      { version: 105, notes: [
+    "Added a \u201cCarried Over (Yesterday)\u201d section to the side panel, right below Quick Report \u2014 shows, per editor, how many still-Pending listings were assigned yesterday and haven't been resolved yet. Same numbers as the Assignment Dashboard's Yesterday + Pending view, now visible without opening it.",
+    "The Assignment Dashboard now shows that same Carried Over breakdown at the top all the time, not just when the Yesterday tab is selected.",
+    "Carried-over listings now sort to the top of Active Assignments and get a small amber \u201cCarried over\u201d badge, so yesterday's leftovers are easy to spot at a glance. Resolving one removes it from all three views automatically.",
+  ]},
 ];
 
 const card = document.getElementById("card");

@@ -61,6 +61,7 @@ const changeBtn      = document.getElementById("changeNameBtn");
 const assignSection  = document.getElementById("assignSection");
 const dpDateTimeEl   = document.getElementById("dpDateTime");
 const dpQuickReportEl = document.getElementById("dpQuickReport");
+const dpCarriedOverEl = document.getElementById("dpCarriedOver");
 
 const listContainer  = document.getElementById("listContainer");
 const totalBadge     = document.getElementById("totalBadge");
@@ -82,6 +83,7 @@ function showSetup() {
   identityBar.style.display  = "none";
   dpDateTimeEl.style.display = "none";
   dpQuickReportEl.style.display = "none";
+  dpCarriedOverEl.style.display = "none";
   assignSection.style.display = "none";
   stopLivePolling();
   stopDateTimeClock();
@@ -92,6 +94,7 @@ function showMain(name, role) {
   identityBar.style.display   = "flex";
   dpDateTimeEl.style.display  = "block";
   dpQuickReportEl.style.display = "block";
+  dpCarriedOverEl.style.display = "block";
   assignSection.style.display = "flex";
 
   currentUserName = name;
@@ -315,6 +318,17 @@ function isToday(iso) {
          d.getDate() === now.getDate();
 }
 
+function isYesterday(iso) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (isNaN(d)) return false;
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  return d.getFullYear() === y.getFullYear() &&
+         d.getMonth() === y.getMonth() &&
+         d.getDate() === y.getDate();
+}
+
 function computeTodayStats(fullAssignments, name) {
   let completed = 0, rejected = 0;
   fullAssignments.forEach(a => {
@@ -444,6 +458,64 @@ function renderQuickReport() {
     tableEl.appendChild(qrRow([r.editor, String(r.completed), String(r.pending), String(r.onHold), String(r.rejected), String(r.total)]));
   });
   tableEl.appendChild(qrRow(["Total", String(totals.completed), String(totals.pending), String(totals.onHold), String(totals.rejected), String(totals.total)], { totalRow: true }));
+}
+
+// ── Carried Over (Yesterday, all editors) ────────────────────────────────
+// Surfaces the Assignment Dashboard's own "Yesterday" scope + Pending
+// column automatically, without needing to open the Dashboard and click
+// that tab — same underlying definition, computed independently here:
+// currently Pending (Assigned or In Progress) AND its effective
+// assignment date (reassignedAt || assignedAt) falls on YESTERDAY
+// specifically — not today, not further back. Live filter over current
+// status + effective date, recomputed fresh on every render, same
+// principle as computeQuickReport/computeTodayStats — no decrement logic
+// anywhere: the moment an item is completed or rejected, its status
+// changes and it naturally drops out of this bucket on the next render.
+function computeCarriedOver(allAssignments) {
+  const perEditor = {};
+  (allAssignments || []).forEach(a => {
+    if (!a || !a.editor) return;
+    if (a.status !== "Assigned" && a.status !== "In Progress") return;
+    const effectiveAt = a.reassignedAt || a.assignedAt;
+    if (!effectiveAt || !isYesterday(effectiveAt)) return;
+    perEditor[a.editor] = (perEditor[a.editor] || 0) + 1;
+  });
+
+  const rows = Object.keys(perEditor).sort().map(editor => ({ editor, count: perEditor[editor] }));
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  return { rows, total };
+}
+
+function renderCarriedOver() {
+  const tableEl = document.getElementById("dpCarriedOverTable");
+  if (!tableEl) return;
+  const { rows, total } = computeCarriedOver(allAssignmentsForAutoAssign);
+  tableEl.innerHTML = "";
+
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "dp-qr-empty";
+    empty.textContent = "Nothing carried over from yesterday.";
+    tableEl.appendChild(empty);
+    return;
+  }
+
+  tableEl.appendChild(qrRow(["", "Pending"], { header: true }));
+  rows.forEach(r => {
+    tableEl.appendChild(qrRow([r.editor, String(r.count)]));
+  });
+  tableEl.appendChild(qrRow(["Total", String(total)], { totalRow: true }));
+}
+
+// Per-item version of the same definition computeCarriedOver uses —
+// shared by Active Assignments' sort/badge below, so a listing counts as
+// "carried over" in exactly the same way whether it's being tallied for
+// the summary block or flagged on its own card.
+function isCarriedOver(a) {
+  if (!a) return false;
+  if (a.status !== "Assigned" && a.status !== "In Progress") return false;
+  const effectiveAt = a.reassignedAt || a.assignedAt;
+  return !!effectiveAt && isYesterday(effectiveAt);
 }
 
 // ── Quick Report collapse/expand ─────────────────────────────────────────
@@ -602,6 +674,7 @@ function renderAutoAssignSettings() {
   renderNextUpLine();
   renderOnDutyList();
   renderQuickReport();
+  renderCarriedOver();
 }
 
 // ── Local snapshot cache ─────────────────────────────────────────────────
@@ -713,7 +786,11 @@ function renderList(name) {
     listContainer.innerHTML = '<div class="empty-state">Nothing in this category right now.</div>';
   } else {
     listContainer.innerHTML = "";
-    visible.forEach(a => listContainer.appendChild(buildAssignCard(a, name)));
+    // Carried-over items (yesterday's still-unresolved Pending work) sort
+    // ahead of everything assigned today — Array.prototype.sort is stable
+    // (ES2019+), so within each group the existing order is preserved.
+    const sorted = [...visible].sort((a, b) => Number(isCarriedOver(b)) - Number(isCarriedOver(a)));
+    sorted.forEach(a => listContainer.appendChild(buildAssignCard(a, name)));
   }
   renderTotalBadge();
 }
@@ -876,7 +953,7 @@ function refreshCard(a, name) {
 
 function buildAssignCard(a, name) {
   const card = document.createElement("div");
-  card.className = "assign-card";
+  card.className = "assign-card" + (isCarriedOver(a) ? " ac-carryover" : "");
   card.dataset.dpRef = a.ref || "";
 
   const statusKey = rowStatusKey(a.status);
@@ -902,6 +979,14 @@ function buildAssignCard(a, name) {
   // ── Top-right cluster: status beside the Rental/Sales pill ─────────────
   const topRight = document.createElement("div");
   topRight.className = "ac-top-right";
+
+  if (isCarriedOver(a)) {
+    const carryBadge = document.createElement("span");
+    carryBadge.className = "ac-carryover-badge";
+    carryBadge.textContent = "Carried over";
+    carryBadge.title = "Still Pending from yesterday";
+    topRight.appendChild(carryBadge);
+  }
 
   if (a.status) {
     const status = document.createElement("span");

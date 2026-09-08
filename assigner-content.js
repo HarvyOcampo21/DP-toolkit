@@ -2974,6 +2974,56 @@
     return table;
   }
 
+  // Persistent "Carried Over" table for the modal's own callout — same
+  // underlying numbers as manually clicking the Yesterday scope tab and
+  // reading the Pending column (see computeDashboardStats), just always
+  // visible regardless of whichever scope is currently selected above.
+  // Reuses sumEditorCategories/buildStatCell for consistency — a cell
+  // here reveals the exact same ref list a Yesterday+Pending cell would.
+  // Only editors with at least one carried-over item get a row.
+  function buildCarriedOverTable(byEditor, editorNames) {
+    const table = document.createElement("table");
+    table.className = "dp-dash-table dp-dash-quick-report-table";
+
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    headRow.appendChild(document.createElement("th"));
+    const pendingTh = document.createElement("th");
+    pendingTh.textContent = "Pending";
+    headRow.appendChild(pendingTh);
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    let grandPending = 0;
+    let grandRefs = [];
+    editorNames.forEach(name => {
+      const { sums, refs } = sumEditorCategories(byEditor[name]);
+      grandPending += sums.pending;
+      grandRefs = grandRefs.concat(refs.pending);
+
+      const row = document.createElement("tr");
+      const nameTd = document.createElement("td");
+      nameTd.className = "dp-dash-status-label";
+      nameTd.textContent = name;
+      row.appendChild(nameTd);
+      row.appendChild(buildStatCell(sums.pending, refs.pending, `${name} \u00B7 Carried Over (Yesterday)`));
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+
+    const tfoot = document.createElement("tfoot");
+    const footRow = document.createElement("tr");
+    const footLabel = document.createElement("td");
+    footLabel.textContent = "Total";
+    footRow.appendChild(footLabel);
+    footRow.appendChild(buildStatCell(grandPending, grandRefs, "Whole Team \u00B7 Carried Over (Yesterday)"));
+    tfoot.appendChild(footRow);
+    table.appendChild(tfoot);
+
+    return table;
+  }
+
   function buildDashEditorCard(name, data) {
     const card = document.createElement("div");
     card.className = "dp-dash-editor-card";
@@ -3098,6 +3148,18 @@
     titleEl.className = "dp-modal-title";
     titleEl.textContent = "Assignment Dashboard";
     modal.appendChild(titleEl);
+
+    // Persistent "Carried Over" callout — always shows yesterday's still-
+    // Pending items regardless of whichever scope tab below is currently
+    // selected, so it's visible immediately rather than something you have
+    // to go find by manually clicking "Yesterday". Repainted every time
+    // render() runs (see there) even though it never depends on `scope`
+    // itself — render() is already this modal's one established repaint
+    // point, so reusing it is simpler than giving one more element its
+    // own separate lifecycle.
+    const carriedOverEl = document.createElement("div");
+    carriedOverEl.className = "dp-dash-carriedover";
+    modal.appendChild(carriedOverEl);
 
     const scopeRow = document.createElement("div");
     scopeRow.className = "dp-dash-scope-toggle";
@@ -3255,6 +3317,28 @@
     }
 
     function render() {
+      // Always "yesterday", independent of whichever scope is selected
+      // below — painted first, before the scope-validity early-return
+      // further down, so this stays visible and correct even while
+      // someone's mid-edit on a Custom Range that isn't valid yet.
+      const { byEditor: yesterdayByEditor } = computeDashboardStats("yesterday");
+      const carriedOverNames = Object.keys(yesterdayByEditor)
+        .filter(n => sumEditorCategories(yesterdayByEditor[n]).sums.pending > 0)
+        .sort();
+      carriedOverEl.innerHTML = "";
+      const coHeading = document.createElement("div");
+      coHeading.className = "dp-dash-subheading";
+      coHeading.textContent = "Carried Over (Yesterday)";
+      carriedOverEl.appendChild(coHeading);
+      if (carriedOverNames.length > 0) {
+        carriedOverEl.appendChild(buildCarriedOverTable(yesterdayByEditor, carriedOverNames));
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "dp-dash-subheading";
+        empty.textContent = "Nothing carried over from yesterday.";
+        carriedOverEl.appendChild(empty);
+      }
+
       todayBtn.classList.toggle("is-active", scope === "today");
       yesterdayBtn.classList.toggle("is-active", scope === "yesterday");
       weekBtn.classList.toggle("is-active", scope === "week");

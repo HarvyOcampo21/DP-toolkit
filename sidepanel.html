@@ -112,6 +112,18 @@
   .assign-card {
     background: #262a38; border: 1px solid #353b4d; border-radius: 9px; padding: 12px 14px;
   }
+  /* Carried-over items (yesterday's still-unresolved Pending work) get a
+     left-border accent so they visually stand apart from today's fresh
+     assignments even before reading anything — same amber "needs
+     attention" tone as the Carried Over summary block above the list. */
+  .assign-card.ac-carryover {
+    border-left: 3px solid #f59e0b;
+  }
+  .ac-carryover-badge {
+    flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 10px; letter-spacing: 0.02em;
+    background: rgba(245,158,11,0.18); color: #f0b24a;
+  }
   .ac-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
   .ac-listing-ref { font-size: 14px; font-weight: 700; color: #e3e6ee; overflow-wrap: anywhere; }
   .ac-top-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -363,6 +375,13 @@
     display: none; /* shown by showMain() once a name is set */
     flex-shrink: 0; margin-bottom: 14px;
   }
+  /* Carried Over reuses the same table/row styling as Quick Report
+     (.dp-qr-*) for visual consistency, but gets its own amber "needs
+     attention" accent — these are yesterday's leftovers, not today's
+     fresh activity, and should read as a small warning at a glance. */
+  .dp-carriedover {
+    border-left: 3px solid #f59e0b; padding-left: 8px;
+  }
   .dp-qr-body {
     max-height: 240px; opacity: 1; overflow: hidden;
     transition: max-height 0.22s ease, opacity 0.18s ease;
@@ -443,6 +462,19 @@
       <button type="button" id="dpQuickReportToggle" class="dp-qr-toggle" title="Show/hide Quick Report">
         <span id="dpQuickReportArrow" class="dp-qr-arrow">▾</span>
       </button>
+    </div>
+
+    <!-- ── Carried Over (Yesterday): items still Pending (Assigned/In
+         Progress) whose effective assignment date is yesterday
+         specifically — the same thing the Assignment Dashboard's
+         "Yesterday" scope + Pending column already shows, surfaced here
+         automatically so it's visible without opening the Dashboard.
+         Live filter, recomputed on every render alongside Quick Report —
+         no decrement logic, so completing/rejecting one just drops it out
+         next render. ── -->
+    <div id="dpCarriedOver" class="dp-quickreport dp-carriedover">
+      <div class="section-title">Carried Over (Yesterday)</div>
+      <div id="dpCarriedOverTable" class="dp-qr-table"></div>
     </div>
 
     <!-- ── Assignments ── -->

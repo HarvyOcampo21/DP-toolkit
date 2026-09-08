@@ -343,6 +343,16 @@
 /* Dashboard modal */
 .dp-dash-modal { width: 620px; min-width: 460px; max-width: 700px; max-height: 82vh; display: flex; flex-direction: column; }
 .dp-dash-scope-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
+/* Persistent Carried Over callout — sits above the scope tabs, so it
+   needs its own bottom margin/divider to read as a separate block rather
+   than blending into the tab row right below it. Amber accent matches
+   the same "needs attention" tone used in the side panel's own Carried
+   Over section and Active Assignments card marker. */
+.dp-dash-carriedover {
+  border-left: 3px solid #f59e0b; padding-left: 10px;
+  margin-bottom: 14px; padding-bottom: 2px;
+}
+.dp-dash-carriedover .dp-dash-subheading { margin-top: 0; }
 .dp-dash-summary { font-size: 0.78rem; color: #6b7280; margin-bottom: 14px; line-height: 1.4; }
 .dp-dash-date-text { color: #9aa0ad; }
 .dp-dash-clock { color: #00d1b2; font-weight: 700; font-variant-numeric: tabular-nums; }
