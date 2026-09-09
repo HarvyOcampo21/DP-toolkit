@@ -485,6 +485,44 @@ function setHookEnabled(val) {
   }
 
   /* =======================
+     AUTO-FILL LOCATION FILTER (another CRM tab)
+  ======================= */
+  // Extracts this listing's sub-location + unit/plot number (same
+  // getSecondLocationOnly()/getUnitPlotNumber() helpers used elsewhere in
+  // this file, no new extraction logic) and hands them to background.js,
+  // which picks a different, specific CRM tab, fills its advanced filter
+  // panel with these values, and switches to it. See background.js's own
+  // comment on handleAutofillLocationFilter for exactly which tab gets
+  // targeted and why. Deliberately does NOT auto-click Search on the
+  // target tab afterward — just fills the fields and leaves submitting to
+  // the person, so they get a chance to review the values first rather
+  // than an unexpected navigation happening out from under them.
+  function autofillLocationFilter() {
+    const location = getSecondLocationOnly();
+    const unitPlot = getUnitPlotNumber();
+
+    if (!location && !unitPlot) {
+      showToast("⚠️ No sub-location or unit/plot number found on this page.", true);
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      { type: "DP_AUTOFILL_LOCATION_FILTER", location, unitPlot },
+      resp => {
+        if (chrome.runtime.lastError) {
+          showToast("❌ " + chrome.runtime.lastError.message, true);
+          return;
+        }
+        if (!(resp && resp.ok)) {
+          showToast("❌ " + ((resp && resp.error) || "Could not fill the filter on the target tab."), true);
+          return;
+        }
+        showToast("✅ Filter filled on the target tab.");
+      },
+    );
+  }
+
+  /* =======================
      CORE ACTIONS
   ======================= */
   function copySecondLocation() {
@@ -1478,10 +1516,12 @@ function setHookEnabled(val) {
     return row;
   }
 
-  // 6 action buttons, 2 rows × 3 columns — this order matches the brief
-  // exactly (Sub-Loc, Search, Copy Data, Quick Log, No Reference, Log to
-  // Sheet). Listing Info and Email Closed are gone entirely, not just
-  // hidden — see their own removed sections.
+  // 7 action buttons now (CTOOLS-01's original 6, plus AUTOFILL-01's
+  // Auto-Fill) — 3-per-row grid, so this trails as a single button on its
+  // own 3rd row rather than filling it evenly. Order matches CTOOLS-01
+  // exactly for the first 6 (Sub-Loc, Search, Copy Data, Quick Log, No
+  // Reference, Log to Sheet); Auto-Fill is appended after, not inserted
+  // in the middle, so it doesn't reshuffle anything already muscle-memorized.
   const COPIER_TOOLS_BUTTONS = [
     ["copy-sub-location-btn", "Sub-Loc", () => copySecondLocation()],
     ["search-sub-location-btn", "Search", () => searchWithSubLocation()],
@@ -1489,6 +1529,7 @@ function setHookEnabled(val) {
     ["quick-log-btn", "⚡ Quick Log", () => quickLogToSheet()],
     ["no-ref-btn", "📷 No Reference", () => openNoRefModal()],
     ["log-to-sheet-btn", "Log to Sheet", () => openLogModal()],
+    ["autofill-location-btn", "🎯 Auto-Fill Tab", () => autofillLocationFilter()],
   ];
 
   function ensureCopierToolsCard() {

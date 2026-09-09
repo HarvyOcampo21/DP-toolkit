@@ -294,6 +294,9 @@ const CHANGELOG = [
     "The Assignment Dashboard now shows that same Carried Over breakdown at the top all the time, not just when the Yesterday tab is selected.",
     "Carried-over listings now sort to the top of Active Assignments and get a small amber \u201cCarried over\u201d badge, so yesterday's leftovers are easy to spot at a glance. Resolving one removes it from all three views automatically.",
   ]},
+      { version: 106, notes: [
+    "Added a new \u201cAuto-Fill Tab\u201d button to Copier Tools \u2014 grabs the current listing's sub-location and unit/plot number, switches to a specific other open CRM tab, opens its filter panel if needed, and fills in Location and Unit/Plot No there for you to review and search yourself.",
+  ]},
 ];
 
 const card = document.getElementById("card");

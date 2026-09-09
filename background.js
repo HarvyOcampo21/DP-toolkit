@@ -236,6 +236,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  // ── Copier Tools "Auto-Fill" button (Location + Unit/Plot No) ──────────
+  if (message.type === "DP_AUTOFILL_LOCATION_FILTER") {
+    handleAutofillLocationFilter(message.location, message.unitPlot, _sender && _sender.tab && _sender.tab.id)
+      .then(() => sendResponse({ ok: true }))
+      .catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
+    return true;
+  }
+
   // ── Auto-assign leader election ─────────────────────────────────────────
   // "First CRM tab" = tabs[0] out of every currently-open tab matching
   // /photorequest/* WITHIN THE SAME BROWSER WINDOW as the tab asking — see
@@ -848,6 +856,84 @@ async function sendFillMessageWithRetry(tabId, ref, attempts = 8) {
     await new Promise(r => setTimeout(r, 400));
   }
   throw new Error("Could not reach the search box on the CRM tab in time.");
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// COPIER TOOLS "AUTO-FILL" BUTTON (Location + Unit/Plot No)
+// ═══════════════════════════════════════════════════════════════════════
+// Extracts a listing's sub-location/unit-plot on the sending tab (see the
+// button handler in copier-content.js) and fills the CRM's own advanced
+// filter panel — Location + Unit/Plot No — on a DIFFERENT, deliberately
+// chosen CRM tab, then brings that tab to the front.
+//
+// "The target CRM tab": every currently open tab matching the CRM's
+// broad host pattern (not narrowed to /photorequest/* the way
+// CRM_REQUESTS_URL_PATTERN above is — the filter panel being filled isn't
+// specific to the Photo Requests page, and the sending tab itself already
+// IS a /photorequest/* tab, so narrowing here would just exclude it
+// anyway), in the order chrome.tabs.query reports them (same "left to
+// right in the tab strip" ordering handleAutoSearch above already
+// relies on), EXCLUDING the tab this request came from, then picking the
+// 3RD tab in what's left (0-indexed position 2). There's no inherent
+// reason it's specifically the 3rd rather than the 1st or 2nd — that was
+// the definition asked for; documented here so it isn't a mystery later.
+// If fewer than 3 other CRM tabs are open, this fails with a clear error
+// rather than silently guessing a different tab.
+//
+// Deliberately does NOT check whether the target tab is on the Photo
+// Requests page specifically — DP_FILL_LOCATION_FILTER's own content
+// script (autofill-location-filter-content.js) is registered site-wide
+// and looks for the filter panel wherever it happens to be. If that tab
+// doesn't have a matching filter panel at all, the content script reports
+// that back as an explicit error rather than this function trying to
+// navigate the tab somewhere first — an unrequested navigation felt like
+// a bigger, riskier move than just telling the person clearly why it
+// didn't work.
+const CRM_HOST_URL_PATTERN = "https://newcrm.drivenproperties.com/*";
+
+async function handleAutofillLocationFilter(location, unitPlot, senderTabId) {
+  if (!location && !unitPlot) throw new Error("Nothing to fill — no location or unit/plot number found.");
+
+  const allCrmTabs = await chrome.tabs.query({ url: CRM_HOST_URL_PATTERN });
+  const candidates = allCrmTabs.filter(t => t.id !== senderTabId);
+
+  if (candidates.length < 3) {
+    throw new Error(`Need at least 3 other CRM tabs open — found ${candidates.length}.`);
+  }
+
+  const target = candidates[2];
+
+  await chrome.tabs.update(target.id, { active: true });
+  if (target.windowId != null) {
+    try { await chrome.windows.update(target.windowId, { focused: true }); } catch {}
+  }
+
+  await sendAutofillMessageWithRetry(target.id, location, unitPlot);
+}
+
+// Same "tab may not have hydrated yet" reasoning as sendFillMessageWithRetry
+// above, but distinguishes two different kinds of non-success: no response
+// at all (content script not attached yet — worth retrying) versus an
+// explicit { ok: false } response (a real failure, e.g. "filter toggle not
+// found on this page" — retrying won't change that answer, so this fails
+// immediately instead of uselessly repeating the same failed attempt).
+async function sendAutofillMessageWithRetry(tabId, location, unitPlot, attempts = 8) {
+  let lastError = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const resp = await chrome.tabs.sendMessage(tabId, { type: "DP_FILL_LOCATION_FILTER", location, unitPlot });
+      if (resp && resp.ok) return;
+      throw new Error((resp && resp.error) || "Could not fill the filter fields.");
+    } catch (e) {
+      lastError = e;
+      const msg = e && e.message || "";
+      if (!/Receiving end does not exist|Could not establish connection/i.test(msg)) {
+        throw e; // a real, non-timing failure — don't waste the remaining retries
+      }
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  throw lastError || new Error("Could not reach the filter panel on the target tab in time.");
 }
 
 // ═══════════════════════════════════════════════════════════════════════
