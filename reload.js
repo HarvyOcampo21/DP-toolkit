@@ -297,6 +297,11 @@ const CHANGELOG = [
       { version: 106, notes: [
     "Added a new \u201cAuto-Fill Tab\u201d button to Copier Tools \u2014 grabs the current listing's sub-location and unit/plot number, switches to a specific other open CRM tab, opens its filter panel if needed, and fills in Location and Unit/Plot No there for you to review and search yourself.",
   ]},
+      { version: 107, notes: [
+    "Active Assignments cards got more breathing room \u2014 more padding, more space between the category/status row and the buttons below it, and slightly larger text on the listing ref and status.",
+    "Carried Over (Yesterday) can now be collapsed/expanded, same as Quick Report \u2014 both remember their collapsed state across closing and reopening the side panel.",
+    "Fixed the Auto-Fill Tab button (from v106) using the wrong filter-panel toggle, which meant it could try to fill in Location/Unit-Plot No before those fields existed on the page. It now correctly opens \u201cMore Filters\u201d first, waits briefly for the fields to actually appear, and shows a clear error instead of silently doing nothing if they never do.",
+  ]},
 ];
 
 const card = document.getElementById("card");

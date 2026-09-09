@@ -5,12 +5,15 @@
 // ═══════════════════════════════════════════════════════════════════════
 // Receives DP_FILL_LOCATION_FILTER from background.js (relayed from the
 // Copier Tools card's Auto-Fill button — see copier-content.js) and fills
-// the CRM's own advanced filter panel: Location and Unit / Plot No,
-// opening the filter panel first if it isn't already open. Matched by
-// stable data-tooltip/placeholder/label attributes rather than the
-// Vue-scoped classes visible in DevTools (cust-inpu-style, pb-0, etc.) —
-// those are exactly the kind of thing that silently changes on the CRM's
-// next deploy, same rationale as auto-all-click-content.js's "All" filter
+// the CRM's own advanced filter panel: Location and Unit / Plot No.
+// Those two fields don't exist in the DOM at all until the "More Filters"
+// toggle is clicked, and the panel's expansion isn't instant either — so
+// this always clicks that toggle first and polls briefly for the fields
+// to actually appear, rather than assuming either one. Matched by stable
+// data-tooltip/placeholder/label attributes rather than the Vue-scoped
+// classes visible in DevTools (cust-inpu-style, pb-0, etc.) — those are
+// exactly the kind of thing that silently changes on the CRM's next
+// deploy, same rationale as auto-all-click-content.js's "All" filter
 // button.
 //
 // Registered site-wide (matches newcrm.drivenproperties.com/*, same as
@@ -21,8 +24,10 @@
 // feature is explicit that a target tab NOT on Photo Requests should
 // still be attempted, not treated as an error up front.
 
-function findFilterToggle() {
-  return document.querySelector('[data-tooltip="Open Filter"]');
+// Confirmed via its tooltip text (data-tooltip="More Filters") — NOT
+// data-tooltip="Open Filter", which doesn't exist on this element.
+function findMoreFiltersToggle() {
+  return document.querySelector('[data-tooltip="More Filters"]');
 }
 
 function findLocationInput() {
@@ -76,20 +81,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "DP_FILL_LOCATION_FILTER") return false;
 
   (async () => {
-    // The Location/Unit fields only exist in the DOM once the filter
-    // panel is actually expanded — use their presence as the "is it
-    // already open" signal rather than tracking open/closed state
-    // separately, since that state could drift out of sync with reality.
+    // The Location/Unit fields only exist in the DOM once "More Filters"
+    // is actually expanded — use their presence as the "is it already
+    // open" signal rather than tracking open/closed state separately,
+    // since that state could drift out of sync with reality. Always click
+    // the toggle first if they're not already there (never assumed to be
+    // instantly present just because the click happened), then poll a
+    // few times over roughly a second for them to actually render before
+    // giving up.
     if (!findLocationInput()) {
-      const toggle = findFilterToggle();
+      const toggle = findMoreFiltersToggle();
       if (!toggle) {
-        sendResponse({ ok: false, error: "Filter toggle not found on this page." });
+        sendResponse({ ok: false, error: '"More Filters" toggle not found on this page.' });
         return;
       }
       toggle.click();
-      const appeared = await waitFor(findLocationInput, 10, 300);
+      const appeared = await waitFor(findLocationInput, 5, 200);
       if (!appeared) {
-        sendResponse({ ok: false, error: "Filter panel did not open in time." });
+        sendResponse({ ok: false, error: "Filter fields did not appear after opening More Filters." });
         return;
       }
     }
@@ -116,3 +125,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return true; // async response
 });
+

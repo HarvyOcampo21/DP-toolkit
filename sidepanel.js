@@ -102,6 +102,7 @@ function showMain(name, role) {
   whoText.textContent = `Hi, ${name}!`;
   startDateTimeClock();
   initQuickReportCollapse();
+  initCarriedOverCollapse();
 
   const autoAssignSection = document.getElementById("dpAutoAssignSection");
   if (autoAssignSection) autoAssignSection.style.display = role === "senior" ? "block" : "none";
@@ -562,6 +563,45 @@ if (quickReportToggleBtn) {
     quickReportCollapsed = !quickReportCollapsed;
     applyQuickReportCollapseState(true);
     try { chrome.storage.local.set({ [DP_QR_COLLAPSED_KEY]: quickReportCollapsed }); } catch (e) { /* non-fatal */ }
+  });
+}
+
+// Same collapse pattern as Quick Report just above, extended to Carried
+// Over so it can also be tucked away to give Active Assignments more
+// visible room — separate storage key so the two sections' collapsed
+// states are independent of each other.
+const DP_CO_COLLAPSED_KEY = "dpCarriedOverCollapsed";
+let carriedOverCollapsed = false;
+
+function applyCarriedOverCollapseState(animate) {
+  const bodyEl = document.getElementById("dpCarriedOverBody");
+  const arrowEl = document.getElementById("dpCarriedOverArrow");
+  if (!bodyEl || !arrowEl) return;
+  if (!animate) {
+    bodyEl.classList.add("dp-qr-no-anim");
+    bodyEl.classList.toggle("is-collapsed", carriedOverCollapsed);
+    arrowEl.classList.toggle("is-collapsed", carriedOverCollapsed);
+    void bodyEl.offsetHeight;
+    bodyEl.classList.remove("dp-qr-no-anim");
+  } else {
+    bodyEl.classList.toggle("is-collapsed", carriedOverCollapsed);
+    arrowEl.classList.toggle("is-collapsed", carriedOverCollapsed);
+  }
+}
+
+function initCarriedOverCollapse() {
+  chrome.storage.local.get([DP_CO_COLLAPSED_KEY], result => {
+    carriedOverCollapsed = result[DP_CO_COLLAPSED_KEY] === true;
+    applyCarriedOverCollapseState(false);
+  });
+}
+
+const carriedOverToggleBtn = document.getElementById("dpCarriedOverToggle");
+if (carriedOverToggleBtn) {
+  carriedOverToggleBtn.addEventListener("click", () => {
+    carriedOverCollapsed = !carriedOverCollapsed;
+    applyCarriedOverCollapseState(true);
+    try { chrome.storage.local.set({ [DP_CO_COLLAPSED_KEY]: carriedOverCollapsed }); } catch (e) { /* non-fatal */ }
   });
 }
 
