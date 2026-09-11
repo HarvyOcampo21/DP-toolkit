@@ -701,13 +701,7 @@
     processTimer = setTimeout(guarded(() => {
       processRows();
       ensureFilterBar();
-      // Must run before ensureDrawerCompleteButton/ensureDrawerRejectButton
-      // now that both target the card those build, not the toolbar —
-      // otherwise the backup buttons wouldn't appear until the next
-      // setInterval tick further down.
       ensureDrawerAssignCard();
-      ensureDrawerCompleteButton();
-      ensureDrawerRejectButton();
     }), inBurst ? BURST_DEBOUNCE_MS : PROCESS_DEBOUNCE_MS);
   }
 
@@ -1081,6 +1075,52 @@
     // !important to win. These cards only exist in the DOM once the row
     // is expanded — handled above inside applyRowStatusStyle now.
 
+    // Backup Complete / Reject — UIFIX-02: previously injected only into
+    // the drawer's Photo Assignment card on a timer (see the removed
+    // ensureDrawerCompleteButton/ensureDrawerRejectButton). Since
+    // renderAssignCell already rebuilds `widget` from scratch on every
+    // status change (widget.innerHTML = "" at the top of both
+    // renderUnassigned and renderAssigned below), appending these here
+    // means list rows and the drawer both get them for free from this one
+    // shared render path — no separate injection loop, no "does this
+    // button already exist for this ref" bookkeeping needed, since a full
+    // rebuild already happens whenever status changes.
+    //
+    // No ROLE gating, matching the original drawer-only behavior — these
+    // are always-on quick actions for both senior and junior, independent
+    // of whatever the CRM's native toolbar does or doesn't offer.
+    function appendBackupButtons(status) {
+      if (!ref) return;
+
+      if (status !== "Completed") {
+        const completeBtn = document.createElement("button");
+        completeBtn.type = "button";
+        completeBtn.className = "dp-backup-complete-btn";
+        completeBtn.textContent = "Complete";
+        completeBtn.title = "Mark this listing Completed";
+        completeBtn.addEventListener("click", guarded(e => {
+          e.stopPropagation();
+          e.preventDefault();
+          backupComplete(ref, completeBtn);
+        }));
+        widget.appendChild(completeBtn);
+      }
+
+      if (status !== "Rejected") {
+        const rejectBtn = document.createElement("button");
+        rejectBtn.type = "button";
+        rejectBtn.className = "dp-backup-reject-btn";
+        rejectBtn.textContent = "Reject";
+        rejectBtn.title = "Mark this listing Rejected";
+        rejectBtn.addEventListener("click", guarded(e => {
+          e.stopPropagation();
+          e.preventDefault();
+          backupReject(ref, rejectBtn);
+        }));
+        widget.appendChild(rejectBtn);
+      }
+    }
+
     function renderUnassigned() {
       applyRowStatusStyle();
       widget.innerHTML = "";
@@ -1123,6 +1163,7 @@
           widget.appendChild(holdBtn);
         }
       }
+      appendBackupButtons("");
     }
 
     function renderAssigned(editor, status) {
@@ -1223,6 +1264,8 @@
         });
         widget.appendChild(reasonBtn);
       }
+
+      appendBackupButtons(status);
     }
 
     function openPopover() {
@@ -3772,14 +3815,22 @@
     return span && span.textContent.trim() === "Complete" ? btn : null;
   }
 
-  // ── Backup Complete / Reject quick actions in the side drawer ────────────
-  // Always-present quick actions in the Photo Assignment card, independent
-  // of whatever the CRM's own toolbar does or doesn't offer for a given
-  // listing — not conditional fallbacks for when a native action is
-  // missing (that was the original behavior; dropped as of v96, since a
-  // fixed always-on control sitting next to Start/Hold is simpler for
-  // editors than one that appears/disappears based on listing type).
-  function completeFromDrawer(ref, btn) {
+  // ── Backup Complete / Reject quick actions ────────────────────────────────
+  // Always-present quick actions, independent of whatever the CRM's own
+  // toolbar does or doesn't offer for a given listing — not conditional
+  // fallbacks for when a native action is missing (that was the original
+  // behavior; dropped as of v96, since a fixed always-on control sitting
+  // next to Start/Hold is simpler for editors than one that
+  // appears/disappears based on listing type).
+  //
+  // UIFIX-02: originally injected only into the side drawer's Photo
+  // Assignment card via a timer (ensureDrawerCompleteButton/
+  // ensureDrawerRejectButton, further down). Now rendered directly inside
+  // renderAssignCell's own widget (see appendBackupButtons below), so both
+  // list rows and the drawer get them from the one shared code path —
+  // these two functions just apply the actual status change and are
+  // called from there regardless of which surface the click came from.
+  function backupComplete(ref, btn) {
     if (!window.dpRequireName()) return;
     const previousEntry = assignmentCache[ref] || null;
     const editor = previousEntry ? previousEntry.editor || "" : "";
@@ -3817,11 +3868,11 @@
     });
   }
 
-  // Same shape as completeFromDrawer — marks Rejected instead of Completed.
+  // Same shape as backupComplete — marks Rejected instead of Completed.
   // No reason prompt: the native Reject-modal interceptor further down
   // doesn't forward a reason to the sheet either (just ref/editor/title),
   // so there's nothing here that would actually get used downstream.
-  function rejectFromDrawer(ref, btn) {
+  function backupReject(ref, btn) {
     if (!window.dpRequireName()) return;
     const previousEntry = assignmentCache[ref] || null;
     const editor = previousEntry ? previousEntry.editor || "" : "";
@@ -3856,88 +3907,6 @@
         }, "Could not mark Rejected — try again.");
       }
     });
-  }
-
-  // Backup Complete button — lives in the "Photo Assignment" card (built by
-  // ensureDrawerAssignCard, which must run first each tick), appended into
-  // the same .dp-assign-widget row as Start/Hold rather than as a new row.
-  // Not added inside renderAssignCell itself: that function is shared
-  // verbatim with the list-row widgets, so anything appended there would
-  // also show up on every row, not just the drawer. Renders on every
-  // listing now (see the header comment above) — no native-button check.
-  function ensureDrawerCompleteButton() {
-    const card = document.getElementById("dp-drawer-assign-card");
-    if (!card) return;
-    const widget = card.querySelector(".dp-assign-widget");
-    if (!widget) return;
-
-    const ref = extractDetailPageRef();
-    let existingOurs = widget.querySelector("#dp-drawer-complete-btn");
-
-    // Drawer switched to a different listing without a full DOM remount —
-    // drop the stale button so it gets re-evaluated for the new listing.
-    if (existingOurs && existingOurs.dataset.dpRef !== ref) {
-      existingOurs.remove();
-      existingOurs = null;
-    }
-
-    if (existingOurs || !ref) return;
-
-    // Already completed in our records — no need to offer it again.
-    const cached = assignmentCache[ref];
-    if (cached && cached.status === "Completed") return;
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.id = "dp-drawer-complete-btn";
-    btn.className = "dp-drawer-complete-btn";
-    btn.dataset.dpRef = ref;
-    btn.textContent = "Complete";
-    btn.title = "Mark this listing Completed";
-    btn.addEventListener("click", guarded(e => {
-      e.stopPropagation();
-      e.preventDefault();
-      completeFromDrawer(ref, btn);
-    }));
-
-    widget.appendChild(btn);
-  }
-
-  // Same pattern as ensureDrawerCompleteButton, mirrored for Reject.
-  function ensureDrawerRejectButton() {
-    const card = document.getElementById("dp-drawer-assign-card");
-    if (!card) return;
-    const widget = card.querySelector(".dp-assign-widget");
-    if (!widget) return;
-
-    const ref = extractDetailPageRef();
-    let existingOurs = widget.querySelector("#dp-drawer-reject-btn");
-
-    if (existingOurs && existingOurs.dataset.dpRef !== ref) {
-      existingOurs.remove();
-      existingOurs = null;
-    }
-
-    if (existingOurs || !ref) return;
-
-    // Already rejected in our records — no need to offer it again.
-    const cached = assignmentCache[ref];
-    if (cached && cached.status === "Rejected") return;
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.id = "dp-drawer-reject-btn";
-    btn.className = "dp-drawer-reject-btn";
-    btn.dataset.dpRef = ref;
-    btn.textContent = "Reject";
-    btn.title = "Mark this listing Rejected";
-    btn.addEventListener("click", guarded(e => {
-      e.stopPropagation();
-      e.preventDefault();
-      rejectFromDrawer(ref, btn);
-    }));
-
-    widget.appendChild(btn);
   }
 
   // ── Assignment card injected into the side drawer's right sidebar ────────
@@ -4037,7 +4006,7 @@
     const previousEntry = assignmentCache[ref] || null;
     const editor = previousEntry ? previousEntry.editor || "" : "";
     const title  = previousEntry ? previousEntry.title  || "" : "";
-    // Spread the previous entry first (same shape as completeFromDrawer)
+    // Spread the previous entry first (same shape as backupComplete)
     // so assignedAt/reassignedAt survive the optimistic update — without
     // this, computeQuickReport/getAutoAssignRecommendation in sidepanel.js
     // (both keyed off effectiveAt = reassignedAt || assignedAt) silently
@@ -4196,9 +4165,12 @@
 
   // The drawer can open/switch listings via a style or class toggle rather
   // than adding/removing DOM nodes, which the childList-only observer above
-  // won't catch. ensureDrawerCompleteButton()/ensureDrawerAssignCard() are a
-  // cheap handful of querySelector calls each, so a lightweight poll is the
-  // most reliable way to keep them in sync with whatever's currently open.
+  // won't catch. ensureDrawerAssignCard() is a cheap handful of
+  // querySelector calls, so a lightweight poll is the most reliable way to
+  // keep it in sync with whatever's currently open. (The backup
+  // Complete/Reject buttons no longer need their own poll entry — they're
+  // rendered as part of renderAssignCell's own widget now, so they come
+  // along for free whenever ensureDrawerAssignCard (re)builds the card.)
   //
   // Same reasoning applies to the row/card status border+tint: editing
   // something inside an expanded row (e.g. the Photo Gallery) can make
@@ -4210,8 +4182,6 @@
   // the wipe.
   setInterval(guarded(() => {
     ensureDrawerAssignCard();
-    ensureDrawerCompleteButton();
-    ensureDrawerRejectButton();
     document.querySelectorAll(".dp-assign-cell").forEach(c => {
       c.__dpReassertVisuals && c.__dpReassertVisuals();
     });

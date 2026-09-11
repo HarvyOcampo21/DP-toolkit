@@ -302,6 +302,11 @@ const CHANGELOG = [
     "Carried Over (Yesterday) can now be collapsed/expanded, same as Quick Report \u2014 both remember their collapsed state across closing and reopening the side panel.",
     "Fixed the Auto-Fill Tab button (from v106) using the wrong filter-panel toggle, which meant it could try to fill in Location/Unit-Plot No before those fields existed on the page. It now correctly opens \u201cMore Filters\u201d first, waits briefly for the fields to actually appear, and shows a clear error instead of silently doing nothing if they never do.",
   ]},
+      { version: 108, notes: [
+    "Fixed the Auto-Fill Tab button (from v106/v107) still not opening the filter panel on some listings \u2014 the toggle is now matched against its actual \u201cOpen Filter\u201d markup instead of the earlier \u201cMore Filters\u201d guess.",
+    "Carried Over (Yesterday) is no longer its own separately-collapsible block \u2014 it now lives inside Quick Report, so collapsing Quick Report hides both together.",
+    "Backup Complete and Reject buttons \u2014 previously only available inside a listing's own detail view \u2014 now also show up directly on each row in the Photo Requests list.",
+  ]},
 ];
 
 const card = document.getElementById("card");

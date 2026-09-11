@@ -61,7 +61,6 @@ const changeBtn      = document.getElementById("changeNameBtn");
 const assignSection  = document.getElementById("assignSection");
 const dpDateTimeEl   = document.getElementById("dpDateTime");
 const dpQuickReportEl = document.getElementById("dpQuickReport");
-const dpCarriedOverEl = document.getElementById("dpCarriedOver");
 
 const listContainer  = document.getElementById("listContainer");
 const totalBadge     = document.getElementById("totalBadge");
@@ -83,7 +82,6 @@ function showSetup() {
   identityBar.style.display  = "none";
   dpDateTimeEl.style.display = "none";
   dpQuickReportEl.style.display = "none";
-  dpCarriedOverEl.style.display = "none";
   assignSection.style.display = "none";
   stopLivePolling();
   stopDateTimeClock();
@@ -94,7 +92,6 @@ function showMain(name, role) {
   identityBar.style.display   = "flex";
   dpDateTimeEl.style.display  = "block";
   dpQuickReportEl.style.display = "block";
-  dpCarriedOverEl.style.display = "block";
   assignSection.style.display = "flex";
 
   currentUserName = name;
@@ -102,7 +99,6 @@ function showMain(name, role) {
   whoText.textContent = `Hi, ${name}!`;
   startDateTimeClock();
   initQuickReportCollapse();
-  initCarriedOverCollapse();
 
   const autoAssignSection = document.getElementById("dpAutoAssignSection");
   if (autoAssignSection) autoAssignSection.style.display = role === "senior" ? "block" : "none";
@@ -566,44 +562,9 @@ if (quickReportToggleBtn) {
   });
 }
 
-// Same collapse pattern as Quick Report just above, extended to Carried
-// Over so it can also be tucked away to give Active Assignments more
-// visible room — separate storage key so the two sections' collapsed
-// states are independent of each other.
-const DP_CO_COLLAPSED_KEY = "dpCarriedOverCollapsed";
-let carriedOverCollapsed = false;
-
-function applyCarriedOverCollapseState(animate) {
-  const bodyEl = document.getElementById("dpCarriedOverBody");
-  const arrowEl = document.getElementById("dpCarriedOverArrow");
-  if (!bodyEl || !arrowEl) return;
-  if (!animate) {
-    bodyEl.classList.add("dp-qr-no-anim");
-    bodyEl.classList.toggle("is-collapsed", carriedOverCollapsed);
-    arrowEl.classList.toggle("is-collapsed", carriedOverCollapsed);
-    void bodyEl.offsetHeight;
-    bodyEl.classList.remove("dp-qr-no-anim");
-  } else {
-    bodyEl.classList.toggle("is-collapsed", carriedOverCollapsed);
-    arrowEl.classList.toggle("is-collapsed", carriedOverCollapsed);
-  }
-}
-
-function initCarriedOverCollapse() {
-  chrome.storage.local.get([DP_CO_COLLAPSED_KEY], result => {
-    carriedOverCollapsed = result[DP_CO_COLLAPSED_KEY] === true;
-    applyCarriedOverCollapseState(false);
-  });
-}
-
-const carriedOverToggleBtn = document.getElementById("dpCarriedOverToggle");
-if (carriedOverToggleBtn) {
-  carriedOverToggleBtn.addEventListener("click", () => {
-    carriedOverCollapsed = !carriedOverCollapsed;
-    applyCarriedOverCollapseState(true);
-    try { chrome.storage.local.set({ [DP_CO_COLLAPSED_KEY]: carriedOverCollapsed }); } catch (e) { /* non-fatal */ }
-  });
-}
+// UIFIX-02: Carried Over no longer has its own collapse state — it lives
+// inside Quick Report's dp-qr-body (see sidepanel.html) and shows/hides
+// together with it via applyQuickReportCollapseState above.
 
 function renderTodayStats() {
   if (!statCompletedEl || !statRejectedEl || !statTotalEl) return;

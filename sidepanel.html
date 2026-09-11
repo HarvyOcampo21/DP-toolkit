@@ -378,10 +378,14 @@
   /* Carried Over reuses the same table/row styling as Quick Report
      (.dp-qr-*) for visual consistency, but gets its own amber "needs
      attention" accent — these are yesterday's leftovers, not today's
-     fresh activity, and should read as a small warning at a glance. */
+     fresh activity, and should read as a small warning at a glance.
+     As of UIFIX-02 this lives inside Quick Report's own dp-qr-body —
+     no collapse state of its own; expanding/collapsing Quick Report
+     shows/hides both as one unit. */
   .dp-carriedover {
-    border-left: 3px solid #f59e0b; padding-left: 8px;
+    border-left: 3px solid #f59e0b; padding-left: 8px; margin-top: 10px;
   }
+  .dp-carriedover-title { margin-bottom: 4px; }
   .dp-qr-body {
     max-height: 240px; opacity: 1; overflow: hidden;
     transition: max-height 0.22s ease, opacity 0.18s ease;
@@ -453,32 +457,33 @@
          "today". Collapsible so Active Assignments (the panel's real
          priority) keeps as much vertical space as possible; state
          persisted in chrome.storage.local so it doesn't reset on every
-         sync/refresh. ── -->
+         sync/refresh.
+
+         UIFIX-02: Carried Over (Yesterday) now lives inside this same
+         collapsible body instead of being its own always-visible block —
+         expanding/collapsing Quick Report shows or hides both together as
+         one unit, and the persisted collapse state above applies to the
+         combined block, not two separate ones. ── -->
     <div id="dpQuickReport" class="dp-quickreport">
       <div class="section-title">Quick Report</div>
       <div id="dpQuickReportBody" class="dp-qr-body">
         <div id="dpQuickReportTable" class="dp-qr-table"></div>
+
+        <!-- Carried Over (Yesterday): items still Pending (Assigned/In
+             Progress) whose effective assignment date is yesterday
+             specifically — the same thing the Assignment Dashboard's
+             "Yesterday" scope + Pending column already shows, surfaced
+             here automatically so it's visible without opening the
+             Dashboard. Live filter, recomputed on every render alongside
+             Quick Report — no decrement logic, so completing/rejecting
+             one just drops it out next render. -->
+        <div id="dpCarriedOver" class="dp-carriedover">
+          <div class="section-title dp-carriedover-title">Carried Over (Yesterday)</div>
+          <div id="dpCarriedOverTable" class="dp-qr-table"></div>
+        </div>
       </div>
       <button type="button" id="dpQuickReportToggle" class="dp-qr-toggle" title="Show/hide Quick Report">
         <span id="dpQuickReportArrow" class="dp-qr-arrow">▾</span>
-      </button>
-    </div>
-
-    <!-- ── Carried Over (Yesterday): items still Pending (Assigned/In
-         Progress) whose effective assignment date is yesterday
-         specifically — the same thing the Assignment Dashboard's
-         "Yesterday" scope + Pending column already shows, surfaced here
-         automatically so it's visible without opening the Dashboard.
-         Live filter, recomputed on every render alongside Quick Report —
-         no decrement logic, so completing/rejecting one just drops it out
-         next render. ── -->
-    <div id="dpCarriedOver" class="dp-quickreport dp-carriedover">
-      <div class="section-title">Carried Over (Yesterday)</div>
-      <div id="dpCarriedOverBody" class="dp-qr-body">
-        <div id="dpCarriedOverTable" class="dp-qr-table"></div>
-      </div>
-      <button type="button" id="dpCarriedOverToggle" class="dp-qr-toggle" title="Show/hide Carried Over">
-        <span id="dpCarriedOverArrow" class="dp-qr-arrow">▾</span>
       </button>
     </div>
 

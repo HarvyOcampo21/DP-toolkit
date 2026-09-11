@@ -6,7 +6,7 @@
 // Receives DP_FILL_LOCATION_FILTER from background.js (relayed from the
 // Copier Tools card's Auto-Fill button — see copier-content.js) and fills
 // the CRM's own advanced filter panel: Location and Unit / Plot No.
-// Those two fields don't exist in the DOM at all until the "More Filters"
+// Those two fields don't exist in the DOM at all until the "Open Filter"
 // toggle is clicked, and the panel's expansion isn't instant either — so
 // this always clicks that toggle first and polls briefly for the fields
 // to actually appear, rather than assuming either one. Matched by stable
@@ -24,10 +24,17 @@
 // feature is explicit that a target tab NOT on Photo Requests should
 // still be attempted, not treated as an error up front.
 
-// Confirmed via its tooltip text (data-tooltip="More Filters") — NOT
-// data-tooltip="Open Filter", which doesn't exist on this element.
+// UIFIX-02: corrected against the actual markup — the toggle's real
+// attribute is data-tooltip="Open Filter", not "More Filters" as
+// originally guessed from the hover tooltip text (AUTOFILL-01/UIFIX-01).
+// The class below (.icon-filter-search-style.suffix-filter-icon) is kept
+// as a secondary match in case a future CRM deploy changes the
+// data-tooltip text again but leaves the icon's own class alone.
 function findMoreFiltersToggle() {
-  return document.querySelector('[data-tooltip="More Filters"]');
+  return (
+    document.querySelector('svg[data-tooltip="Open Filter"]') ||
+    document.querySelector(".icon-filter-search-style.suffix-filter-icon")
+  );
 }
 
 function findLocationInput() {
@@ -81,7 +88,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "DP_FILL_LOCATION_FILTER") return false;
 
   (async () => {
-    // The Location/Unit fields only exist in the DOM once "More Filters"
+    // The Location/Unit fields only exist in the DOM once "Open Filter"
     // is actually expanded — use their presence as the "is it already
     // open" signal rather than tracking open/closed state separately,
     // since that state could drift out of sync with reality. Always click
@@ -92,13 +99,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!findLocationInput()) {
       const toggle = findMoreFiltersToggle();
       if (!toggle) {
-        sendResponse({ ok: false, error: '"More Filters" toggle not found on this page.' });
+        sendResponse({ ok: false, error: '"Open Filter" toggle not found on this page.' });
         return;
       }
       toggle.click();
       const appeared = await waitFor(findLocationInput, 5, 200);
       if (!appeared) {
-        sendResponse({ ok: false, error: "Filter fields did not appear after opening More Filters." });
+        sendResponse({ ok: false, error: "Filter fields did not appear after opening the filter panel." });
         return;
       }
     }
