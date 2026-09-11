@@ -30,11 +30,27 @@
 // The class below (.icon-filter-search-style.suffix-filter-icon) is kept
 // as a secondary match in case a future CRM deploy changes the
 // data-tooltip text again but leaves the icon's own class alone.
+//
+// DEBUG-01: the selector itself was confirmed correct via DevTools, but a
+// plain .click() on this element wasn't opening the panel. Kept as a
+// standalone lookup (rather than folded into openFilterPanel below) since
+// it's also used on its own by the "does it already exist" check further
+// down — visibility-filtered so a hidden duplicate elsewhere in the DOM
+// (see DEBUG-01 point 3) doesn't get preferred over the one actually on
+// screen.
+function isVisible(el) {
+  return !!el && el.offsetParent !== null;
+}
+
 function findMoreFiltersToggle() {
-  return (
-    document.querySelector('svg[data-tooltip="Open Filter"]') ||
-    document.querySelector(".icon-filter-search-style.suffix-filter-icon")
+  const candidates = Array.from(
+    document.querySelectorAll('svg[data-tooltip="Open Filter"], .icon-filter-search-style.suffix-filter-icon')
   );
+  if (candidates.length === 0) return null;
+  // querySelectorAll with a comma-list already de-dupes a single element
+  // matching both parts of the selector, so this filter is purely about
+  // picking the visible one out of genuinely distinct matches.
+  return candidates.find(isVisible) || candidates[0];
 }
 
 function findLocationInput() {
@@ -84,6 +100,63 @@ function waitFor(checkFn, attempts, delayMs) {
   });
 }
 
+// DEBUG-01 — dispatches a real mousedown→mouseup→click sequence, since
+// Vue's directive on this element may not respond the same way a plain
+// `element.click()` does.
+function fireFullClick(el) {
+  if (!el) return false;
+  const opts = { bubbles: true, cancelable: true, view: window };
+  el.dispatchEvent(new MouseEvent("mousedown", opts));
+  el.dispatchEvent(new MouseEvent("mouseup", opts));
+  el.dispatchEvent(new MouseEvent("click", opts));
+  return true;
+}
+
+// DEBUG-01 point 1 — the SVG sits inside a <span class="tooltip__container">
+// (or similar), and Vue's @click is plausibly bound to that wrapper, not
+// the <svg> itself. Returns the wrapper first (if one exists and differs
+// from the icon), then the icon itself, as separate candidates — never
+// combined into one click, since firing both on a toggle would just
+// re-close whatever the first one opened.
+function getToggleClickTargets(iconEl) {
+  const wrapper = iconEl.closest('span, button, [role="button"]');
+  const targets = [];
+  if (wrapper && wrapper !== iconEl) targets.push(wrapper);
+  targets.push(iconEl);
+  return targets;
+}
+
+// Tries each (target × click-method) combination in turn — wrapper before
+// icon, full synthetic event before plain .click() — checking after each
+// one whether the Location field actually appeared before moving to the
+// next. Strictly sequential and stops at the first success, both to avoid
+// wasted attempts and because firing a second click strategy after one
+// that already worked would toggle the panel back closed.
+async function openFilterPanel() {
+  // DEBUG-01 point 4 — confirm the toggle exists AND is actually rendered
+  // (offsetParent !== null) before ever attempting a click, rather than
+  // assuming it's there the instant this message is received; Vue may not
+  // have mounted this part of the page yet.
+  const toggle = await waitFor(findMoreFiltersToggle, 10, 150);
+  if (!toggle) {
+    return { ok: false, error: '"Open Filter" toggle not found (or not visible) on this page.' };
+  }
+
+  const targets = getToggleClickTargets(toggle);
+  const attempts = [
+    ...targets.map(target => () => fireFullClick(target)),
+    ...targets.map(target => () => { target.click(); return true; }),
+  ];
+
+  for (const attempt of attempts) {
+    attempt();
+    const appeared = await waitFor(findLocationInput, 4, 150);
+    if (appeared) return { ok: true };
+  }
+
+  return { ok: false, error: "Clicked the filter toggle but the panel never opened." };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "DP_FILL_LOCATION_FILTER") return false;
 
@@ -91,21 +164,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // The Location/Unit fields only exist in the DOM once "Open Filter"
     // is actually expanded — use their presence as the "is it already
     // open" signal rather than tracking open/closed state separately,
-    // since that state could drift out of sync with reality. Always click
-    // the toggle first if they're not already there (never assumed to be
-    // instantly present just because the click happened), then poll a
-    // few times over roughly a second for them to actually render before
-    // giving up.
+    // since that state could drift out of sync with reality.
     if (!findLocationInput()) {
-      const toggle = findMoreFiltersToggle();
-      if (!toggle) {
-        sendResponse({ ok: false, error: '"Open Filter" toggle not found on this page.' });
-        return;
-      }
-      toggle.click();
-      const appeared = await waitFor(findLocationInput, 5, 200);
-      if (!appeared) {
-        sendResponse({ ok: false, error: "Filter fields did not appear after opening the filter panel." });
+      const result = await openFilterPanel();
+      if (!result.ok) {
+        sendResponse({ ok: false, error: result.error });
         return;
       }
     }

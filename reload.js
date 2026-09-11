@@ -307,6 +307,9 @@ const CHANGELOG = [
     "Carried Over (Yesterday) is no longer its own separately-collapsible block \u2014 it now lives inside Quick Report, so collapsing Quick Report hides both together.",
     "Backup Complete and Reject buttons \u2014 previously only available inside a listing's own detail view \u2014 now also show up directly on each row in the Photo Requests list.",
   ]},
+      { version: 109, notes: [
+    "Fixed the Auto-Fill Tab button (from v108) finding the right filter-panel toggle but still not opening it in some cases \u2014 it now tries a couple of different ways of clicking that toggle until one actually opens the panel, instead of relying on a single click that wasn't always registering.",
+  ]},
 ];
 
 const card = document.getElementById("card");
