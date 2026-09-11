@@ -310,6 +310,9 @@ const CHANGELOG = [
       { version: 109, notes: [
     "Fixed the Auto-Fill Tab button (from v108) finding the right filter-panel toggle but still not opening it in some cases \u2014 it now tries a couple of different ways of clicking that toggle until one actually opens the panel, instead of relying on a single click that wasn't always registering.",
   ]},
+      { version: 110, notes: [
+    "Moved the backup Complete/Reject buttons down onto the Drive/History/Copy Ref row, both on list rows and in a listing's Photo Assignment card \u2014 the status row above now stays just Assigned/Start/Hold.",
+  ]},
 ];
 
 const card = document.getElementById("card");

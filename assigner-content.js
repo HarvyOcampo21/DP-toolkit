@@ -852,6 +852,10 @@
     // in one wrapper so flex-wrap moves them as a single unit. Without
     // this, .dp-action-row's wrap could break the trio apart individually
     // (e.g. copy dropping to its own line while drive+history stay put).
+    // UIFIX-03: also holds the backup Complete/Reject buttons now — see
+    // appendBackupButtons further down, which appends into this same
+    // element so they render alongside Drive/History/Copy-ref instead of
+    // next to the status widget.
     const iconGroup = document.createElement("div");
     iconGroup.className = "dp-icon-btn-group";
     actionRow.appendChild(iconGroup);
@@ -1077,20 +1081,27 @@
 
     // Backup Complete / Reject — UIFIX-02: previously injected only into
     // the drawer's Photo Assignment card on a timer (see the removed
-    // ensureDrawerCompleteButton/ensureDrawerRejectButton). Since
-    // renderAssignCell already rebuilds `widget` from scratch on every
-    // status change (widget.innerHTML = "" at the top of both
-    // renderUnassigned and renderAssigned below), appending these here
-    // means list rows and the drawer both get them for free from this one
-    // shared render path — no separate injection loop, no "does this
-    // button already exist for this ref" bookkeeping needed, since a full
-    // rebuild already happens whenever status changes.
+    // ensureDrawerCompleteButton/ensureDrawerRejectButton). Appending
+    // these here means list rows and the drawer both get them for free
+    // from this one shared render path.
+    //
+    // UIFIX-03: moved from `widget` (the status pill + Start/Hold row)
+    // onto `iconGroup` (the Drive/History/Copy-ref row) so that row reads
+    // as the full action row and the status row above stays just
+    // Assigned/Start/Hold. Unlike `widget`, `iconGroup` is built once in
+    // renderAssignCell's own body and is NOT cleared/rebuilt by
+    // renderUnassigned/renderAssigned on every status change — so this
+    // clears out any backup buttons it appended on a previous call before
+    // adding fresh ones, otherwise every status change would just stack
+    // another pair on top of the last.
     //
     // No ROLE gating, matching the original drawer-only behavior — these
     // are always-on quick actions for both senior and junior, independent
     // of whatever the CRM's native toolbar does or doesn't offer.
     function appendBackupButtons(status) {
       if (!ref) return;
+
+      iconGroup.querySelectorAll(".dp-backup-complete-btn, .dp-backup-reject-btn").forEach(el => el.remove());
 
       if (status !== "Completed") {
         const completeBtn = document.createElement("button");
@@ -1103,7 +1114,7 @@
           e.preventDefault();
           backupComplete(ref, completeBtn);
         }));
-        widget.appendChild(completeBtn);
+        iconGroup.appendChild(completeBtn);
       }
 
       if (status !== "Rejected") {
@@ -1117,7 +1128,7 @@
           e.preventDefault();
           backupReject(ref, rejectBtn);
         }));
-        widget.appendChild(rejectBtn);
+        iconGroup.appendChild(rejectBtn);
       }
     }
 

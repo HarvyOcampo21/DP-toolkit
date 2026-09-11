@@ -46,12 +46,16 @@
   flex: 0 0 auto;
 }
 
-/* Drive / history / copy-ref icon trio — kept as one flex item so wrapping
-   moves all three together instead of breaking the group apart. */
+/* Drive / history / copy-ref icons, plus (as of UIFIX-03) the backup
+   Complete/Reject buttons — kept as one flex item so wrapping moves the
+   whole group together instead of breaking it apart mid-row. Wraps
+   internally (rather than the original icon-only trio's nowrap) since
+   five buttons — two of them text, not just icons — won't reliably fit
+   on one line in a narrow list-row cell. */
 .dp-icon-btn-group {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 5px;
   flex: 0 0 auto;
 }
