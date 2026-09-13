@@ -776,47 +776,6 @@ function assignerDoPost_impl(p) {
     });
   }
 
-  // URGENT-01 Part B — same idea, extended to manual assign/reassign
-  // clicks (senior or junior), which previously had no guard at all: the
-  // client always writes optimistically off its own last-synced snapshot
-  // of who currently holds this ref (assigner-content.js's
-  // `previousEntry`), and that snapshot goes stale the instant someone
-  // else's assign lands in the gap before this request gets its turn
-  // under the lock above.
-  //
-  // p.expectedPrevEditor is exactly that snapshot, forwarded as-is from
-  // the client — used ONLY for this comparison, never trusted for the
-  // write itself (prevEditor/prevStatus above are read fresh from the
-  // sheet regardless of what the client believed). Three things all have
-  // to be true to reject:
-  //   1. The row is currently held by someone (an active status).
-  //   2. Whoever holds it now is a DIFFERENT editor than this request is
-  //      trying to assign it to — a request that's just re-confirming the
-  //      current holder isn't a conflict, it's a no-op.
-  //   3. The current holder ISN'T who the client last knew about — if the
-  //      client's snapshot already matched, this is either a fresh
-  //      assign onto a row nobody touched since, or a deliberate
-  //      reassign the client made with accurate info, and both are
-  //      legitimate, not a race.
-  //
-  // Condition 2 is also what keeps this from false-positiving on the
-  // requesting editor's own successful write landing a second time (a
-  // network retry re-sending the same request): by the time the retry
-  // runs, prevEditor already equals `editor` (the first attempt already
-  // wrote it), so this doesn't fire and the retry just harmlessly
-  // rewrites the same values.
-  if (
-    ri > -1 &&
-    isActiveAssignmentStatus(prevStatus) &&
-    prevEditor !== editor &&
-    (p.expectedPrevEditor || "") !== prevEditor
-  ) {
-    return jsonResponse({
-      ref: p.ref, skipped: true, reason: "already assigned",
-      editor: prevEditor, status: prevStatus, updatedAt: fmt(ex(ASSIGNER_COL.UPDATED_AT)),
-    });
-  }
-
   const isReAssign = !!(ri > -1 && prevEditor && prevEditor !== editor);
   // "Fresh start" = there's no real prior assignment to build on — either
   // this is a genuine reassign (different editor), or whatever's on file

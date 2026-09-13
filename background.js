@@ -496,8 +496,7 @@ function dispatchAssignerMessage(message, sendResponse) {
   if (message.type === "DP_ASSIGN") {
     postToAssignerSheet({ action: "assign", ref: message.ref, editor: message.editor,
       title: message.title || "", actionBy: message.actionBy || "",
-      crmStatus: message.crmStatus || "", isAutoAssign: !!message.isAutoAssign,
-      expectedPrevEditor: message.expectedPrevEditor || "" }, sendResponse);
+      crmStatus: message.crmStatus || "", isAutoAssign: !!message.isAutoAssign }, sendResponse);
     return true;
   }
 
