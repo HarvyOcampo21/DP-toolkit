@@ -1387,7 +1387,15 @@
         applyFilters();
 
         safeSendMessage({ type: "DP_ASSIGN", ref, editor, title, reAssign: isReAssign,
-          actionBy: MY_NAME, crmStatus: categoryOverride, isAutoAssign }, resp => {
+          actionBy: MY_NAME, crmStatus: categoryOverride, isAutoAssign,
+          // URGENT-01 Part B — the server compares this against the row's
+          // ACTUAL current editor at write time (never trusts it for the
+          // write itself) to tell a genuine race apart from a deliberate,
+          // accurately-informed reassign. previousEntry is this client's
+          // last-synced belief about who holds it, captured above before
+          // the optimistic local update — "" for a listing this client
+          // believed was unassigned.
+          expectedPrevEditor: (previousEntry && previousEntry.editor) || "" }, resp => {
           // The server declined to write because this ref was already
           // genuinely claimed (by another tab's auto-assign, or a manual
           // assign that landed first) by the time our request got its turn
@@ -1406,6 +1414,18 @@
             if (isActiveStatus(actualStatus)) renderAssigned(actualEditor, actualStatus);
             else renderUnassigned();
             applyFilters();
+            // URGENT-01 Part B — a manual click losing this race is a
+            // different situation from the write-failure case below (the
+            // request reached the server fine; it was correctly declined
+            // because someone else got there first) and needs to look
+            // different to the person who clicked, not just silently
+            // relabel the row and leave them to notice on their own. Auto
+            // -assign backing off is the same server response shape but
+            // stays silent — that's an unattended background action with
+            // no one waiting on feedback from this specific click.
+            if (!isAutoAssign) {
+              alert(actualEditor ? `Already assigned to ${actualEditor}.` : "Already assigned to someone else.");
+            }
             return;
           }
           if (!(resp && resp.ok)) {

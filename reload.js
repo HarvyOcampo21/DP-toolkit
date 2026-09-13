@@ -313,6 +313,9 @@ const CHANGELOG = [
       { version: 110, notes: [
     "Moved the backup Complete/Reject buttons down onto the Drive/History/Copy Ref row, both on list rows and in a listing's Photo Assignment card \u2014 the status row above now stays just Assigned/Start/Hold.",
   ]},
+      { version: 111, notes: [
+    "If two people try to grab the same listing around the same time, the second one now gets a clear \u201cAlready assigned to \u2026\u201d message instead of the row silently reverting \u2014 the request is safely rejected server-side instead of overwriting the first person's claim.",
+  ]},
 ];
 
 const card = document.getElementById("card");
